@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "657968992199",
+    "project_id": "safeplay-55e0a",
+    "storage_bucket": "safeplay-55e0a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:657968992199:android:aa2526573958c1a6a9d3e2",
+        "android_client_info": {
+          "package_name": "com.chat.safeplay"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANy8FvbdEVgw1T9Twrdp5rkdOFM0sDQZg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
