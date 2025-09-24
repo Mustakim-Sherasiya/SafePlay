@@ -65,7 +65,11 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.16.0")) // Firebase BOM
     implementation("com.google.firebase:firebase-analytics-ktx")       // Firebase Analytics
     implementation("com.google.firebase:firebase-auth-ktx")            // Firebase Auth
-    implementation("com.google.firebase:firebase-firestore-ktx:24.7.1") // Firebase Firestore
+    implementation("com.google.firebase:firebase-firestore-ktx:24.7.1")
+    implementation(libs.firebase.storage.ktx)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.storage)
+    implementation(libs.firebase.bom) // Firebase Firestore
 
     testImplementation("junit:junit:4.13.2")                          // JUnit
     androidTestImplementation("androidx.test.ext:junit:1.1.5")        // AndroidX JUnit
@@ -77,40 +81,59 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")       // Compose test manifest
 
 
+    implementation("io.coil-kt:coil-compose:2.4.0")
+
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.2.2")
+    implementation("androidx.media3:media3-ui:1.2.2")
+
+    implementation(platform(libs.firebase.bom))
+
+    // Firebase libraries (versions controlled by the BoM)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.storage.ktx)
+
+
 }
 
 
 
-
-
-
-
-
 //dependencies {
+//    // BoMs
+//    implementation(platform(libs.androidx.compose.bom))
+//    implementation(platform(libs.firebase.bom))
+//
+//    // Compose
 //    implementation(libs.androidx.core.ktx)
 //    implementation(libs.androidx.lifecycle.runtime.ktx)
 //    implementation(libs.androidx.activity.compose)
-//    implementation(platform(libs.androidx.compose.bom))
 //    implementation(libs.androidx.ui)
 //    implementation(libs.androidx.ui.graphics)
 //    implementation(libs.androidx.ui.tooling.preview)
-//    implementation(libs.androidx.material3)           // Make sure libs.androidx.material3 has correct version
-//    implementation("androidx.navigation:navigation-compose:2.7.2")
-//    // replace navigation.runtime.android with navigation.compose
+//    implementation(libs.androidx.material3)
+//    implementation(libs.androidx.navigation.compose)
+//    implementation(libs.androidx.compose.material.icons.extended)
 //
-//    implementation(libs.androidx.compose.material.icons.extended)  // icons extended
-//
-//    implementation(platform("com.google.firebase:firebase-bom:33.16.0"))
-//    implementation("com.google.firebase:firebase-analytics")
+//    // Firebase (no explicit versions here, BoM controls them)
+//    implementation(libs.firebase.analytics)
+//    implementation(libs.firebase.storage.ktx)
 //    implementation("com.google.firebase:firebase-auth-ktx")
-//    implementation("androidx.compose.material3:material3:1.1.0") // Replace 1.1.0 with latest stable version
-//    implementation("com.google.firebase:firebase-firestore-ktx:24.7.1")
+//    implementation("com.google.firebase:firebase-firestore-ktx")
 //
+//    // Other
+//    implementation("io.coil-kt:coil-compose:2.4.0")
+//    implementation("androidx.media3:media3-exoplayer:1.4.1")
+//    implementation("androidx.media3:media3-ui:1.4.1")
+//
+//    // Testing
 //    testImplementation(libs.junit)
 //    androidTestImplementation(libs.androidx.junit)
 //    androidTestImplementation(libs.androidx.espresso.core)
 //    androidTestImplementation(platform(libs.androidx.compose.bom))
 //    androidTestImplementation(libs.androidx.ui.test.junit4)
+//
+//    // Debug
 //    debugImplementation(libs.androidx.ui.tooling)
 //    debugImplementation(libs.androidx.ui.test.manifest)
 //}

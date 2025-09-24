@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 
 @Composable
 fun CreatePinScreen(
@@ -34,6 +35,7 @@ fun CreatePinScreen(
     var pin by remember { mutableStateOf("") }
     var showSubmitButton by remember { mutableStateOf(false) }
     var dropdownExpanded by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -111,6 +113,8 @@ fun CreatePinScreen(
                 if (it.length <= pinLength && it.all { c -> c.isDigit() }) {
                     pin = it
                     if (autoSubmit && pin.length == pinLength) {
+                        isSaving = true
+                        // Save immediately
                         savePinAndNavigate(
                             pin,
                             pinLength,
@@ -119,7 +123,7 @@ fun CreatePinScreen(
                             firestore,
                             context,
                             navController,
-                            userIdForPinReset != null // true if resetting PIN (save to Firestore but don't navigate to userDashboard)
+                            userIdForPinReset != null // true if resetting PIN
                         )
                         onPinCreated?.invoke(pin, pinLength, autoSubmit)
                     }
@@ -136,20 +140,31 @@ fun CreatePinScreen(
 
         Spacer(Modifier.height(16.dp))
 
+        if (isSaving) {
+            CircularProgressIndicator()
+            Spacer(Modifier.height(8.dp))
+            Text("Saving PIN...")
+        }
+
         if (showSubmitButton) {
-            Button(onClick = {
-                savePinAndNavigate(
-                    pin,
-                    pinLength,
-                    autoSubmit,
-                    userIdForPinReset ?: user?.uid,
-                    firestore,
-                    context,
-                    navController,
-                    userIdForPinReset != null
-                )
-                onPinCreated?.invoke(pin, pinLength, autoSubmit)
-            }) {
+            Button(
+                onClick = {
+                    isSaving = true
+                    savePinAndNavigate(
+                        pin,
+                        pinLength,
+                        autoSubmit,
+                        userIdForPinReset ?: user?.uid,
+                        firestore,
+                        context,
+                        navController,
+                        userIdForPinReset != null
+                    )
+                    onPinCreated?.invoke(pin, pinLength, autoSubmit)
+                    // isSaving will be cleared by success/failure callbacks (through toasts)
+                },
+                enabled = !isSaving
+            ) {
                 Text("Submit PIN")
             }
         }
@@ -178,7 +193,8 @@ private fun savePinAndNavigate(
         "autoSubmit" to autoSubmit
     )
 
-    userDocRef.set(data)
+    // Use merge so we don't overwrite other fields like email, phone, publicId, createdAt, etc.
+    userDocRef.set(data, SetOptions.merge())
         .addOnSuccessListener {
             // Save PIN locally too
             PinStorageHelper.savePin(context, pin, pinLength, autoSubmit)
@@ -189,12 +205,10 @@ private fun savePinAndNavigate(
                 Toast.LENGTH_SHORT
             ).show()
             if (!isPinReset) {
-                // Only navigate to userDashboard if this is normal flow (not PIN reset)
                 navController.navigate("userDashboard") {
                     popUpTo("enterPin") { inclusive = true }
                 }
             } else {
-                // For PIN reset, just navigate back (e.g. to login or PIN reset menu)
                 navController.popBackStack()
             }
         }
@@ -206,3 +220,67 @@ private fun savePinAndNavigate(
             ).show()
         }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+//private fun savePinAndNavigate(
+//    pin: String,
+//    pinLength: Int,
+//    autoSubmit: Boolean,
+//    userId: String?,
+//    firestore: FirebaseFirestore,
+//    context: android.content.Context,
+//    navController: NavController,
+//    isPinReset: Boolean = false
+//) {
+//    if (userId == null) {
+//        Toast.makeText(context, "User not logged in.", Toast.LENGTH_SHORT).show()
+//        return
+//    }
+//    val userDocRef = firestore.collection("users").document(userId)
+//
+//    val data = mapOf(
+//        "pin" to pin,
+//        "pinLength" to pinLength,
+//        "autoSubmit" to autoSubmit
+//    )
+//
+//    // <-- IMPORTANT: merge so existing fields like email/phone/role are preserved
+//    userDocRef.set(data, SetOptions.merge())
+//        .addOnSuccessListener {
+//            // Save PIN locally too
+//            PinStorageHelper.savePin(context, pin, pinLength, autoSubmit)
+//
+//            Toast.makeText(
+//                context,
+//                if (isPinReset) "PIN reset successfully" else "PIN saved successfully",
+//                Toast.LENGTH_SHORT
+//            ).show()
+//            if (!isPinReset) {
+//                // Only navigate to userDashboard if this is normal flow (not PIN reset)
+//                navController.navigate("userDashboard") {
+//                    popUpTo("enterPin") { inclusive = true }
+//                }
+//            } else {
+//                // For PIN reset, just navigate back (e.g. to login or PIN reset menu)
+//                navController.popBackStack()
+//            }
+//        }
+//        .addOnFailureListener { e ->
+//            Toast.makeText(
+//                context,
+//                "Failed to save PIN: ${e.message}",
+//                Toast.LENGTH_LONG
+//            ).show()
+//        }
+//}

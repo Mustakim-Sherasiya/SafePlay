@@ -13,6 +13,9 @@ navigationComposeJvmstubs = "2.9.2"
 navigation = "2.7.2"
 compose-material-icons = "1.5.0"
 
+# 🔹 only keep the BoM version, remove the other firebase versions
+firebaseBom = "33.1.0"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -32,6 +35,14 @@ androidx-navigation-runtime-android = { group = "androidx.navigation", name = "n
 androidx-navigation-compose-jvmstubs = { group = "androidx.navigation", name = "navigation-compose-jvmstubs", version.ref = "navigationComposeJvmstubs" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "compose-material-icons" }
+
+# 🔹 Firebase BoM
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+
+# 🔹 Firebase libraries (no versions, managed by BoM)
+firebase-storage-ktx = { module = "com.google.firebase:firebase-storage-ktx" }
+firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
+firebase-storage = { module = "com.google.firebase:firebase-storage" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
