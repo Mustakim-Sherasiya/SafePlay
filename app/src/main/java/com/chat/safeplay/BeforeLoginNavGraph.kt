@@ -1,12 +1,8 @@
 
 
-
-
-
-
-
 package com.chat.safeplay
 
+import GameSelectionScreen
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +32,8 @@ import com.chat.safeplay.profile.ProfileRoutes
 import com.chat.safeplay.profile.ProfileScreen
 import com.chat.safeplay.chat.handler.ChatRoutes
 import com.chat.safeplay.chat.handler.ChatScreen
+import com.chat.safeplay.setting.manager.SettingRoutes
+import setting.manager.SettingsScreen
 
 // Import your PIN storage helper (implement separately)
 
@@ -388,9 +386,11 @@ fun BeforeLoginNavGraph(
         }
 
 
-//        composable(ProfileRoutes.SETTINGS) {
-//            SettingsScreen(navController = navController) // placeholder for now
-//        }
+        composable(SettingRoutes.SETTINGS) {
+            // If SettingsScreen expects a NavHostController or other args, pass them.
+            // Example if it accepts navController:
+            SettingsScreen(navController = navController)
+        }
 //
 //        composable(ProfileRoutes.STARRED) {
 //            StarredScreen(navController = navController) // placeholder for now

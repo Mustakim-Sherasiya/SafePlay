@@ -26,9 +26,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".GameActivity" />
-        <activity android:name=".TapTheDotActivity" />
-        <activity android:name=".ColorMemoryActivity" />
+        <activity android:name="games.GameActivity" />
+        <activity android:name="games.TapTheDotActivity" />
+        <activity android:name="games.ColorMemoryActivity" />
+        <activity android:name=".games.SafeRunnerActivity" />
+
+
 
 
 

@@ -67,7 +67,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
 import android.util.Log
-
+import com.chat.safeplay.setting.manager.SettingRoutes
 
 
 // replace the existing data class User { ... } with this
@@ -446,7 +446,14 @@ fun UserDashboardScreen(
                                         text = { Text("Settings") },
                                         onClick = {
                                             profileMenuExpanded = false
-                                            Toast.makeText(context, "Settings clicked", Toast.LENGTH_SHORT).show()
+                                            navController.navigate(SettingRoutes.SETTINGS) {
+                                                // avoid multiple copies on the back stack
+                                                launchSingleTop = true
+                                                // restore state if we're coming back to this destination later
+                                                restoreState = true
+                                                // optional: pop up to the dashboard saving its state (prevents deep back stacks)
+                                                // popUpTo("user_dashboard") { saveState = true }
+                                            }
                                         }
                                     )
                                     DropdownMenuItem(
@@ -732,7 +739,7 @@ fun UserDashboardScreen(
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                             .fillMaxWidth()
                             .clickable {
-                                // compute the other participant id from the convoId (works for uid_uid or publicId_publicId)
+                                // compute the other participant id from the convoId (works for uid_uid  or publicId_publicId)
                                 val otherId = otherIdFromConvo(conv.convoId, appUid)
                                 if (!conv.hasMessages) {
                                     Toast.makeText(context, "No messages yet — start the conversation", Toast.LENGTH_SHORT).show()

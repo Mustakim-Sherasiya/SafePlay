@@ -367,6 +367,74 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
         startPresenceListener()
     }
 
+
+
+
+
+
+
+
+//----------------------------------------------------------------------
+//    private fun startListeningMessagesIfReady() {
+//        // clear previous
+//        clearListeners()
+//
+//        val (uidConvo, pubConvo) = getActiveConvoIds()
+//        val uidConvoId = uidConvo
+//        val publicConvoId = pubConvo
+//
+//        fun attachListenerFor(convoId: String, onUpdate: (List<ChatUiMessage>) -> Unit): ListenerRegistration {
+//            return db.collection("chats")
+//                .document(convoId)
+//                .collection("messages")
+//                .orderBy("timestamp", Query.Direction.ASCENDING)
+//                .addSnapshotListener { snaps, err ->
+//                    if (err != null) {
+//                        Log.w(TAG, "messagesListener($convoId) error", err)
+//                        return@addSnapshotListener
+//                    }
+//                    if (snaps != null) {
+//                        val msgs = snaps.documents.mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }
+//                        Log.d(TAG, "messagesListener($convoId) update: ${msgs.size} messages")
+//                        onUpdate(msgs)
+//                        // mark delivered for any messages not delivered for this uid
+//                        markDeliveredForSnapshots(snaps.documents)
+//                    } else {
+//                        Log.d(TAG, "messagesListener($convoId) null snaps")
+//                    }
+//                }
+//        }
+//
+//        if (!uidConvoId.isNullOrBlank()) {
+//            Log.d(TAG, "Starting primary (UID) messages listener for convoId=$uidConvoId")
+//            messagesListener = attachListenerFor(uidConvoId) { msgs ->
+//                _messages.value = msgs
+//                // if uid listener empty, attach fallback to publicId path to try legacy messages
+//                if (msgs.isEmpty() && publicConvoId.isNotBlank() && publicConvoId != uidConvoId) {
+//                    if (fallbackListener == null) {
+//                        Log.d(TAG, "UID listener empty — attaching fallback listener for publicId-based convoId=$publicConvoId")
+//                        fallbackListener = attachListenerFor(publicConvoId) { fallbackMsgs ->
+//                            if (fallbackMsgs.isNotEmpty()) _messages.value = fallbackMsgs
+//                        }
+//                    }
+//                } else {
+//                    fallbackListener?.remove(); fallbackListener = null
+//                }
+//            }
+//        } else {
+//            // fall back to publicId-based convo
+//            if (publicConvoId.isBlank()) {
+//                Log.d(TAG, "No valid convoId available for listening yet.")
+//                return
+//            }
+//            Log.d(TAG, "Starting messages listener for publicId-based convoId=$publicConvoId")
+//            messagesListener = attachListenerFor(publicConvoId) { msgs -> _messages.value = msgs }
+//        }
+//
+//        // ensure presence listener is (re)started
+//        startPresenceListener()
+//    }
+
     // mark deliveredBy.{myUid} = true for any message not yet marked
     private fun markDeliveredForSnapshots(docs: List<DocumentSnapshot>) {
         if (myUid.isBlank()) return

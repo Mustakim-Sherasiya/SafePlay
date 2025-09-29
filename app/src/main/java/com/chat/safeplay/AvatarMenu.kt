@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
 import com.chat.safeplay.profile.ProfileRoutes
+import com.chat.safeplay.setting.manager.SettingRoutes
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -66,7 +67,7 @@ fun AvatarMenu(
                         }
                     }
                 )
-//                // ✅ Settings
+                // ✅ Settings
 //                DropdownMenuItem(
 //                    text = { Text("Settings") },
 //                    onClick = {

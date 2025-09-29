@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
                         if (
                             currentRoute != "adminGraph" &&
                             currentRoute != "profile" &&
+                            currentRoute != "settings"&&
                             currentRoute?.startsWith("chat/") == false
                         ) {
                             BottomNavigationBar(navController)
