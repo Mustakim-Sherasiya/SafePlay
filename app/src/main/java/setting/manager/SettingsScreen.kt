@@ -1,5 +1,5 @@
 // SettingsScreenUsingVideoView.kt
-package setting.manager // adjust if your package differs
+package com.chat.safeplay.setting.manager // adjust if your package differs
 
 import android.content.Context
 import android.media.MediaPlayer
@@ -47,12 +47,14 @@ fun SettingsScreen(
     onChangeChatBackground: () -> Unit = {},
     onDelayChat: () -> Unit = {},
     onRequestAccountDeletion: () -> Unit = {},
-    navController: NavHostController
-) {
+    navController: NavHostController,
+    onBackToDashboard: () -> Unit = {} // ✅ added this
+)
+ {
     val ctx = LocalContext.current
     val items = listOf(
         SettingItemData("Password manager", rawResourceUri(ctx, R.raw.pass_change)),
-        SettingItemData("Request PIN change", rawResourceUri(ctx, R.raw.pin_change)),
+        SettingItemData("PIN change", rawResourceUri(ctx, R.raw.pin_change)),
         SettingItemData("Change chat background", rawResourceUri(ctx, R.raw.change_chat_background)),
         SettingItemData("Delay Chat", rawResourceUri(ctx, R.raw.delay_chat)),
         SettingItemData("Request Account Deletion", rawResourceUri(ctx, R.raw.account_delete))
@@ -95,9 +97,10 @@ fun SettingsScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(onClick = { onBackToDashboard() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
+
                 },
                 colors = TopAppBarDefaults.smallTopAppBarColors(containerColor = Color.Transparent)
             )
@@ -114,35 +117,31 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             items.forEachIndexed { idx, item ->
-                val clickAction = when (idx) {
+                val clickAction: () -> Unit = when (idx) {
                     0 -> onOpenPasswordManager
                     1 -> onRequestPinChange
                     2 -> onChangeChatBackground
                     3 -> onDelayChat
                     4 -> onRequestAccountDeletion
-                    else -> {}
+                    else -> ({})
                 }
 
-                // Row styled like your screenshot: rounded dark tile + circular icon at left
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(80.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(Color(0xFF1E1E1E))
-                        // Put clickable on the Row (outer) so VideoView doesn't intercept touch.
                         .clickable {
-                            // show toast with exact title
                             Toast.makeText(ctx, item.title, Toast.LENGTH_SHORT).show()
-                            // then perform passed action
-                            clickAction()
+                            clickAction() // ✅ will now safely call the right lambda
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    VideoViewIcon(uriString = item.uri ,size = 40) ///// CHANGE SIZE HERE TO CHANGE LOGO SIZE
+                    VideoViewIcon(uriString = item.uri, size = 40)
                     Spacer(modifier = Modifier.width(7.dp))
-                    Column(modifier = Modifier.weight(0.06f)) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = item.title,
                             color = Color(0xFFDCDCDC),
@@ -153,6 +152,7 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(18.dp))
             }
+
         }
     }
 }

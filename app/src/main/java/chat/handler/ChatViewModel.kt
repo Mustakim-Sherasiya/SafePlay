@@ -308,64 +308,43 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
     }
 
     private fun startListeningMessagesIfReady() {
-        // clear previous
         clearListeners()
 
-        val (uidConvo, pubConvo) = getActiveConvoIds()
-        val uidConvoId = uidConvo
-        val publicConvoId = pubConvo
+        val uidConvo = uidConvoId()
+        if (uidConvo.isNullOrBlank()) {
+            Log.d(TAG, "No valid UID convoId available yet.")
+            return
+        }
 
-        fun attachListenerFor(convoId: String, onUpdate: (List<ChatUiMessage>) -> Unit): ListenerRegistration {
-            return db.collection("chats")
-                .document(convoId)
-                .collection("messages")
-                .orderBy("timestamp", Query.Direction.ASCENDING)
-                .addSnapshotListener { snaps, err ->
-                    if (err != null) {
-                        Log.w(TAG, "messagesListener($convoId) error", err)
-                        return@addSnapshotListener
-                    }
-                    if (snaps != null) {
-                        val msgs = snaps.documents.mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }
-                        Log.d(TAG, "messagesListener($convoId) update: ${msgs.size} messages")
-                        onUpdate(msgs)
-                        // mark delivered for any messages not delivered for this uid
-                        markDeliveredForSnapshots(snaps.documents)
+        Log.d(TAG, "Starting primary (UID) messages listener for convoId=$uidConvo")
+        messagesListener = db.collection("chats")
+            .document(uidConvo)
+            .collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snaps, err ->
+                if (err != null) {
+                    if (err is FirebaseFirestoreException) {
+                        Log.e(TAG, "messagesListener failed for convoId=$uidConvo code=${err.code}, message=${err.message}")
                     } else {
-                        Log.d(TAG, "messagesListener($convoId) null snaps")
+                        Log.e(TAG, "messagesListener unexpected error for convoId=$uidConvo", err)
                     }
+                    return@addSnapshotListener
                 }
-        }
 
-        if (!uidConvoId.isNullOrBlank()) {
-            Log.d(TAG, "Starting primary (UID) messages listener for convoId=$uidConvoId")
-            messagesListener = attachListenerFor(uidConvoId) { msgs ->
-                _messages.value = msgs
-                // if uid listener empty, attach fallback to publicId path to try legacy messages
-                if (msgs.isEmpty() && publicConvoId.isNotBlank() && publicConvoId != uidConvoId) {
-                    if (fallbackListener == null) {
-                        Log.d(TAG, "UID listener empty — attaching fallback listener for publicId-based convoId=$publicConvoId")
-                        fallbackListener = attachListenerFor(publicConvoId) { fallbackMsgs ->
-                            if (fallbackMsgs.isNotEmpty()) _messages.value = fallbackMsgs
-                        }
-                    }
+                if (snaps != null) {
+                    val msgs = snaps.documents.mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }
+                    Log.d(TAG, "messagesListener($uidConvo) update: ${msgs.size} messages")
+                    _messages.value = msgs
+                    markDeliveredForSnapshots(snaps.documents)
                 } else {
-                    fallbackListener?.remove(); fallbackListener = null
+                    Log.d(TAG, "messagesListener($uidConvo) null snaps")
                 }
             }
-        } else {
-            // fall back to publicId-based convo
-            if (publicConvoId.isBlank()) {
-                Log.d(TAG, "No valid convoId available for listening yet.")
-                return
-            }
-            Log.d(TAG, "Starting messages listener for publicId-based convoId=$publicConvoId")
-            messagesListener = attachListenerFor(publicConvoId) { msgs -> _messages.value = msgs }
-        }
 
         // ensure presence listener is (re)started
         startPresenceListener()
     }
+
 
 
 

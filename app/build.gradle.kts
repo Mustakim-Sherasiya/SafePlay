@@ -58,7 +58,7 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.2.0")     // Latest stable Material3
     implementation("androidx.compose.material3:material3-window-size-class:1.2.0") // Optional window size helper
 
-    implementation("androidx.navigation:navigation-compose:2.7.2")   // Navigation Compose
+
 
     implementation("androidx.compose.material:material-icons-extended:1.4.3") // Material Icons Extended
 
@@ -85,14 +85,19 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
-    implementation("androidx.media3:media3-exoplayer:1.2.2")
-    implementation("androidx.media3:media3-ui:1.2.2")
+
+
 
     implementation(platform(libs.firebase.bom))
 
     // Firebase libraries (versions controlled by the BoM)
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.storage.ktx)
+
+    // Smooth image Navigations
+   
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("com.google.accompanist:accompanist-navigation-animation:0.33.2-alpha")
 
 
 }

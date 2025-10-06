@@ -1,5 +1,6 @@
 package com.chat.safeplay.chat.handler
 
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -33,7 +34,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.max
 import androidx.compose.foundation.layout.Arrangement
-
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import com.chat.safeplay.setting.manager.getSavedBackgroundUri
+import com.chat.safeplay.setting.manager.saveBackgroundUri
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,6 +58,34 @@ fun ChatScreen(
     val typingState by vm.typingState.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val isDarkTheme = isSystemInDarkTheme()
+
+    var customBackgroundUri by remember { mutableStateOf<Uri?>(null) }
+
+
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+
+    LaunchedEffect(uid) {
+        if (uid != null) {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("users").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    val url = doc.getString("backgroundUrl")
+                    if (!url.isNullOrBlank()) {
+                        customBackgroundUri = Uri.parse(url)
+                        saveBackgroundUri(context, url) // cache locally for faster next load
+                    } else {
+                        customBackgroundUri = getSavedBackgroundUri(context)
+                    }
+                }
+                .addOnFailureListener {
+                    customBackgroundUri = getSavedBackgroundUri(context)
+                }
+        } else {
+            customBackgroundUri = getSavedBackgroundUri(context)
+        }
+    }
+
     val listState = rememberLazyListState()
 
     // auto-clear selection and typing when this Composable is disposed (navigated away)
@@ -189,129 +226,192 @@ fun ChatScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .background(
+                    if (customBackgroundUri == null)
+                        if (isDarkTheme) Color.Black else Color.White
+                    else
+                        Color.Transparent
+                )
         ) {
-
-            // Typing indicator row (small)
-            if (otherIsTyping) {
-                Text(
-                    text = "$displayName is typing...",
+            // background image if user selected one
+            customBackgroundUri?.let {
+                AsyncImage(
+                    model = it,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                        .fillMaxSize()
+                        .background(Color.Transparent)
                 )
             }
 
-            // Messages list
-            LazyColumn(
+            // main chat content column
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                state = listState
+                    .fillMaxSize()
+                    .padding(innerPadding)
             ) {
-                itemsIndexed(messages) { _, msg ->
-                    val isMine = (msg.fromId == vm.myPublicId) || (msg.fromId == vm.myUid)
 
-                    MessageBubble(
-                        message = msg,
-                        isMine = isMine,
-                        showAvatar = true, // keep avatar always shown
-                        avatarUrl = if (isMine) vm.myPhotoUrl else otherUser.photoUrl,
-                        selected = selected.contains(msg.id),
-                        onLongPress = {
-                            // try to toggle selection as before
-                            vm.toggleSelect(msg.id)
-                        },
-                        onTap = {
-                            if (selected.isNotEmpty()) vm.toggleSelect(msg.id)
-                        },
-                        onRetrySend = {
-                            // retry using message.text
-                            vm.retrySend(msg.text) { success, err ->
-                                if (!success) Toast.makeText(context, "Retry failed: ${err ?: "unknown"}", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onReactionClick = { emoji ->
-                            vm.toggleReaction(msg.id, emoji) { success, err ->
-                                if (!success) Toast.makeText(context, "Reaction failed: ${err ?: "unknown"}", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onOpenReactions = {
-                            reactionTargetMessageId = msg.id
-                            reactionPickerOpen = true
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
+// ------------------- SHOWING TYPING INDICATOR -------------------//
+                // Typing indicator row (small)
+                if (otherIsTyping) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (customBackgroundUri != null)
+                                    Color.Black.copy(alpha = 0.35f)
+                                else
+                                    Color.Transparent
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "$displayName is typing...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .shadow(2.dp, ambientColor = Color.Black.copy(alpha = 0.6f)) // ✅ subtle glow here
+                        )
+                    }
                 }
-            }
 
-            // Input bar + typing handling
-            var input by remember { mutableStateOf("") }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
-                    .padding(start = 16.dp, end = 9.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextField(
-                    value = input,
-                    onValueChange = { new ->
-                        input = new
-                        // typing debounce: send typing=true immediately, then reset to false after 1500ms of inactivity
-                        typingJob?.cancel()
-                        vm.setTyping(true)
-                        typingJob = scope.launch {
-                            delay(1500)
-                            vm.setTyping(false)
-                        }
-                    },
-                    placeholder = { Text("Message") },
+
+
+                // Messages list
+                LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .height(54.dp),
-                    colors = TextFieldDefaults.textFieldColors(
-                        containerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    ),
-                    singleLine = true
-                )
-                IconButton(onClick = {
-                    if (input.isNotBlank() && input.trim().isNotEmpty()) {
-                        val textToSend = input.trim()
-                        // stop typing indicator
-                        typingJob?.cancel()
-                        vm.setTyping(false)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    state = listState
+                ) {
+                    itemsIndexed(messages) { _, msg ->
+                        val isMine =
+                            msg.fromId == vm.myUid || msg.fromId == vm.myPublicId.ifBlank { vm.myUid }
 
-                        vm.sendMessage(textToSend) { success, err ->
-                            if (!success) {
-                                Toast.makeText(context, "Send failed: ${err ?: "unknown"}", Toast.LENGTH_SHORT).show()
-                            } else {
-                                // success feedback
+
+                        MessageBubble(
+                            message = msg,
+                            isMine = isMine,
+                            showAvatar = true, // keep avatar always shown
+                            avatarUrl = if (isMine) vm.myPhotoUrl else otherUser.photoUrl,
+                            selected = selected.contains(msg.id),
+                            onLongPress = {
+                                // try to toggle selection as before
+                                vm.toggleSelect(msg.id)
+                            },
+                            onTap = {
+                                if (selected.isNotEmpty()) vm.toggleSelect(msg.id)
+                            },
+                            onRetrySend = {
+                                // retry using message.text
+                                vm.retrySend(msg.text) { success, err ->
+                                    if (!success) Toast.makeText(
+                                        context,
+                                        "Retry failed: ${err ?: "unknown"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            onReactionClick = { emoji ->
+                                vm.toggleReaction(msg.id, emoji) { success, err ->
+                                    if (!success) Toast.makeText(
+                                        context,
+                                        "Reaction failed: ${err ?: "unknown"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            onOpenReactions = {
+                                reactionTargetMessageId = msg.id
+                                reactionPickerOpen = true
                             }
-                        }
-                        input = ""
-                        scope.launch {
-                            if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
-                        }
-                    } else {
-                        // prevent sending spaces
-                        if (input.isNotBlank()) Toast.makeText(context, "Cannot send only spaces", Toast.LENGTH_SHORT).show()
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
                     }
-                }) {
-                    Icon(Icons.Default.Send, contentDescription = "Send")
+                }
+
+                // Input bar + typing handling
+                var input by remember { mutableStateOf("") }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(
+                            if (customBackgroundUri != null)
+                                Color.Black.copy(alpha = 0.4f)   // 🔹 darker overlay when wallpaper active
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                        )
+
+                        .padding(start = 16.dp, end = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextField(
+                        value = input,
+                        onValueChange = { new ->
+                            input = new
+                            // typing debounce: send typing=true immediately, then reset to false after 1500ms of inactivity
+                            typingJob?.cancel()
+                            vm.setTyping(true)
+                            typingJob = scope.launch {
+                                delay(1500)
+                                vm.setTyping(false)
+                            }
+                        },
+                        placeholder = { Text("Message") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp),
+                        colors = TextFieldDefaults.textFieldColors(
+                            containerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
+                        singleLine = true
+                    )
+                    IconButton(onClick = {
+                        if (input.isNotBlank() && input.trim().isNotEmpty()) {
+                            val textToSend = input.trim()
+                            // stop typing indicator
+                            typingJob?.cancel()
+                            vm.setTyping(false)
+
+                            vm.sendMessage(textToSend) { success, err ->
+                                if (!success) {
+                                    Toast.makeText(
+                                        context,
+                                        "Send failed: ${err ?: "unknown"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    // success feedback
+                                }
+                            }
+                            input = ""
+                            scope.launch {
+                                if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+                            }
+                        } else {
+                            // prevent sending spaces
+                            if (input.isNotBlank()) Toast.makeText(
+                                context,
+                                "Cannot send only spaces",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }) {
+                        Icon(Icons.Default.Send, contentDescription = "Send")
+                    }
                 }
             }
         }
