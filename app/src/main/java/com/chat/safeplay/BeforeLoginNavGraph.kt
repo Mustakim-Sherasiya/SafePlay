@@ -1,3 +1,4 @@
+
 package com.chat.safeplay
 
 import GameSelectionScreen
@@ -8,22 +9,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Games
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
-
-// ✅ Accompanist Animated Navigation
-import com.google.accompanist.navigation.animation.AnimatedNavHost
-import com.google.accompanist.navigation.animation.composable
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
-
-// ✅ Firebase + Project imports
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import androidx.compose.ui.Alignment
+// Import your PIN reset nav graph here
 import com.chat.safeplay.navigation.PinNavGraph
+import com.google.firebase.firestore.FirebaseFirestore
 import com.chat.safeplay.navigation.AdminNavGraph
 import com.chat.safeplay.profile.ProfileRoutes
 import com.chat.safeplay.profile.ProfileScreen
@@ -31,6 +33,10 @@ import com.chat.safeplay.chat.handler.ChatRoutes
 import com.chat.safeplay.chat.handler.ChatScreen
 import com.chat.safeplay.setting.manager.SettingRoutes
 import com.chat.safeplay.setting.manager.SettingsNavGraph
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+
+
 
 
 // Import your PIN storage helper (implement separately)
@@ -468,27 +474,18 @@ fun BottomNavigationBar(navController: NavHostController) {
         )
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
 //
 //
 //package com.chat.safeplay
@@ -966,14 +963,3 @@ fun BottomNavigationBar(navController: NavHostController) {
 //        )
 //    }
 //}
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
