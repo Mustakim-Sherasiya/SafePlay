@@ -10,8 +10,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RawRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -40,8 +46,12 @@ import coil.compose.AsyncImage
 import com.chat.safeplay.R
 import androidx.compose.material3.Text   // ✅ <-- add this line
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 
@@ -201,7 +211,7 @@ fun ChangeChatBackgroundScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 20.dp)
+                        .padding(bottom = 16.dp)
                 ) {
                     Text(
                         text = "Uploading background... ${(uploadProgress * 100).toInt()}%",
@@ -210,23 +220,13 @@ fun ChangeChatBackgroundScreen(
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    val animatedProgress by animateFloatAsState(
-                        targetValue = uploadProgress,
-                        animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing)
-                    )
-
-                    LinearProgressIndicator(
-                        progress = animatedProgress,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.DarkGray.copy(alpha = 0.3f)),
-                        color = Color(0xFF00BCD4), // SafePlay cyan accent
-                        trackColor = Color.Transparent
+                    AnimatedUploadBar(
+                        progress = uploadProgress,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
+
 
 // 🔹 🖼️ Then your current wallpaper preview (below the progress bar)
             if (customUri != null) {
@@ -264,14 +264,58 @@ fun ChangeChatBackgroundScreen(
                 item {
                     BackgroundVideoItem(
                         title = "Default",
-                        videoRes = R.raw.default_wallpaper, // 🔹 your MP4 file for dark animated background
+                        videoRes = R.raw.default_wallpaper,
                         onClick = {
-                            customUri = null
-                            clearSavedBackground(context)
-                            Toast.makeText(context, "Default background applied", Toast.LENGTH_SHORT).show()
+                            val uid = FirebaseAuth.getInstance().currentUser?.uid
+                            if (uid == null) {
+                                Toast.makeText(context, "Please log in first", Toast.LENGTH_SHORT).show()
+                                return@BackgroundVideoItem
+                            }
+
+                            val db = FirebaseFirestore.getInstance()
+                            val userDoc = db.collection("users").document(uid)
+
+                            // 🔹 Fetch current background URL (if exists) to delete from storage
+                            userDoc.get().addOnSuccessListener { snapshot ->
+                                val oldUrl = snapshot.getString("backgroundUrl")
+
+                                // 🔹 Delete the background URL field from Firestore
+                                userDoc.update(mapOf("backgroundUrl" to FieldValue.delete()))
+                                    .addOnSuccessListener {
+                                        // 🔹 Clear local cache
+                                        customUri = null
+                                        clearSavedBackground(context)
+
+                                        // 🔹 Remove old image from Firebase Storage if it existed
+                                        if (!oldUrl.isNullOrEmpty()) {
+                                            FirebaseStorage.getInstance().getReferenceFromUrl(oldUrl)
+                                                .delete()
+                                                .addOnSuccessListener {
+                                                    println("✅ Old wallpaper deleted successfully")
+                                                }
+                                                .addOnFailureListener { e ->
+                                                    println("⚠️ Failed to delete old wallpaper: ${e.message}")
+                                                }
+                                        }
+
+                                        Toast.makeText(
+                                            context,
+                                            "Restored to default background",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Toast.makeText(
+                                            context,
+                                            "Failed to reset: ${e.message}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                            }
                         }
                     )
                 }
+
 
                 // 🔵 Custom wallpaper item with live + icon video
                 item {
@@ -375,4 +419,79 @@ fun BackgroundVideoItem(
         )
     }
 }
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+fun AnimatedUploadBar(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    // 🟢 SafePlay accent color
+    val accentColor = Color(0xFF00BCD4)
+
+    // 🌈 Infinite shimmer + glow animation
+    val infiniteTransition = rememberInfiniteTransition(label = "uploadGlow")
+
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
+
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = -200f,
+        targetValue = 800f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmerOffset"
+    )
+
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+            accentColor.copy(alpha = glowAlpha * 0.3f),
+            accentColor.copy(alpha = 0.9f),
+            accentColor.copy(alpha = glowAlpha * 0.3f)
+        ),
+        start = Offset(shimmerOffset - 200f, 0f),
+        end = Offset(shimmerOffset + 200f, 0f)
+    )
+
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 300, easing = LinearEasing),
+        label = "uploadProgressAnim"
+    )
+
+    // 🔹 Shimmering glowing bar
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .background(
+                Color.Gray.copy(alpha = 0.25f),
+                RoundedCornerShape(50)
+            )
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(animatedProgress)
+                .height(8.dp)
+                .background(shimmerBrush, RoundedCornerShape(50))
+                .shadow(
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(50),
+                    ambientColor = accentColor.copy(alpha = glowAlpha * 0.6f),
+                    spotColor = accentColor.copy(alpha = glowAlpha * 0.6f)
+                )
+        )
+    }
+}
+
+
 

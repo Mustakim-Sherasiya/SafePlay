@@ -5,6 +5,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.room.util.copy
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.*
@@ -13,10 +14,12 @@ import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.math.pow
 import java.util.Date
+import kotlin.collections.toMutableMap
 
 
 /**
@@ -136,6 +139,15 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
     private var otherUserListener: ListenerRegistration? = null
     private var myProfileListener: ListenerRegistration? = null
 
+
+    // 🔹 Delay chat settings
+    private var delayChatEnabled: Boolean = false
+    private var delayChatSeconds: Int = 1
+    private var delaySettingsListener: ListenerRegistration? = null
+
+    private val _pendingMessages = MutableStateFlow<Map<String, PendingMessage>>(emptyMap())
+    val pendingMessages = _pendingMessages.asStateFlow()
+
     // pending local send state used for retries (messageLocalId -> retryCount)
     private val pendingRetries = ConcurrentHashMap<String, Int>()
 
@@ -146,6 +158,8 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
         Log.d(TAG, "Init ChatViewModel: myUid=$myUid otherPublicId=$otherPublicId")
         observeOtherUser()
         observeMyProfile()
+        observeDelaySettings()
+
     }
 
     // ------------------ PROFILE & OTHER USER ------------------
@@ -243,6 +257,31 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
             }
         }
     }
+
+        //-----  DELAY CHAT SETTINGS -----//
+
+    // 🔹 Live listener for delay chat settings
+    private fun observeDelaySettings() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val userRef = db.collection("users").document(uid)
+
+        delaySettingsListener = userRef.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.w(TAG, "observeDelaySettings error", error)
+                return@addSnapshotListener
+            }
+            if (snapshot != null && snapshot.exists()) {
+                delayChatEnabled = snapshot.getBoolean("delayChatEnabled") ?: false
+                delayChatSeconds = (snapshot.getLong("delayChatSeconds") ?: 1L).toInt()
+                Log.d(TAG, "Delay settings updated: enabled=$delayChatEnabled, seconds=$delayChatSeconds")
+            }
+        }
+    }
+
+
+
+
+
 
     // ------------------ CONVO ID HELPERS ------------------
 
@@ -511,27 +550,82 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
         return result
     }
 
+
+
     fun sendMessage(text: String, onComplete: ((Boolean, String?) -> Unit)? = null) {
         val trimmed = text.trim()
-        if (trimmed.isBlank()) {
-            onComplete?.invoke(false, "Empty message")
-            return
-        }
-        if (myUid.isBlank()) {
-            onComplete?.invoke(false, "My UID not available")
+        if (trimmed.isBlank() || myUid.isBlank()) {
+            onComplete?.invoke(false, "Empty or invalid message")
             return
         }
 
-        // apply profanity filter
         val cleaned = profanityFilter(trimmed)
-
-        // create a temp local id for retry bookkeeping
         val localId = "local-${System.currentTimeMillis()}-${(0..999).random()}"
-        // optimistic local insertion (UI can display status=SENDING for this local id — UI must support)
-        // We won't add local object to _messages here; the real-time listener will add the saved doc once server writes.
         pendingRetries[localId] = 0
-        performSendWithRetry(cleaned, localId, onComplete)
+
+        if (delayChatEnabled) {
+            val seconds = delayChatSeconds.coerceIn(1, 3)
+            // Add to pending list
+            _pendingMessages.value = _pendingMessages.value + (localId to PendingMessage(localId, cleaned, seconds))
+
+            // Countdown + send after delay
+            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                for (i in seconds downTo 1) {
+                    val updated = _pendingMessages.value.toMutableMap()
+                    updated[localId] = updated[localId]?.copy(remainingSeconds = i) ?: continue
+                    _pendingMessages.emit(updated)
+                    kotlinx.coroutines.delay(1000)
+                }
+
+                // 🟢 If still pending (not canceled), send
+                if (_pendingMessages.value.containsKey(localId)) {
+                    performSendWithRetry(cleaned, localId, onComplete)
+                    val updated = _pendingMessages.value.toMutableMap()
+                    updated.remove(localId)
+                    _pendingMessages.emit(updated)
+                }
+            }
+        } else {
+            // Send instantly
+            performSendWithRetry(cleaned, localId, onComplete)
+        }
     }
+
+    // 🔹 Cancel message before it's sent (during delay)
+
+    fun cancelPendingMessage(localId: String) {
+        val updated = _pendingMessages.value.toMutableMap()
+        updated.remove(localId)
+        _pendingMessages.value = updated
+        Log.d(TAG, "❌ Canceled pending message: $localId")
+    }
+
+
+
+
+
+
+//    fun sendMessage(text: String, onComplete: ((Boolean, String?) -> Unit)? = null) {
+//        val trimmed = text.trim()
+//        if (trimmed.isBlank()) {
+//            onComplete?.invoke(false, "Empty message")
+//            return
+//        }
+//        if (myUid.isBlank()) {
+//            onComplete?.invoke(false, "My UID not available")
+//            return
+//        }
+//
+//        // apply profanity filter
+//        val cleaned = profanityFilter(trimmed)
+//
+//        // create a temp local id for retry bookkeeping
+//        val localId = "local-${System.currentTimeMillis()}-${(0..999).random()}"
+//        // optimistic local insertion (UI can display status=SENDING for this local id — UI must support)
+//        // We won't add local object to _messages here; the real-time listener will add the saved doc once server writes.
+//        pendingRetries[localId] = 0
+//        performSendWithRetry(cleaned, localId, onComplete)
+//    }
 
     private fun performSendWithRetry(cleaned: String, localId: String, onComplete: ((Boolean, String?) -> Unit)?) {
         val attempt = pendingRetries[localId] ?: 0
@@ -678,6 +772,9 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
         presenceListener?.remove(); presenceListener = null
         otherUserListener?.remove(); otherUserListener = null
         myProfileListener?.remove(); myProfileListener = null
+        delaySettingsListener?.remove(); delaySettingsListener = null
+
+
 
         // clear typing presence
         val convoId = uidConvoId() ?: publicIdConvoId()
@@ -692,6 +789,13 @@ class ChatViewModelFactory(private val otherPublicId: String) : ViewModelProvide
         return ChatViewModel(otherPublicId) as T
     }
 }
+
+// 🔹 Data model for pending unsent messages
+data class PendingMessage(
+    val localId: String,
+    val text: String,
+    val remainingSeconds: Int
+)
 
 
 

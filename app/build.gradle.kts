@@ -69,7 +69,8 @@ dependencies {
     implementation(libs.firebase.storage.ktx)
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.storage)
-    implementation(libs.firebase.bom) // Firebase Firestore
+    implementation(libs.firebase.bom)
+    implementation(libs.androidx.room.ktx) // Firebase Firestore
 
     testImplementation("junit:junit:4.13.2")                          // JUnit
     androidTestImplementation("androidx.test.ext:junit:1.1.5")        // AndroidX JUnit

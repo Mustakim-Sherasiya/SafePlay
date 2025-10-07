@@ -38,11 +38,28 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.chat.safeplay.setting.manager.getSavedBackgroundUri
 import com.chat.safeplay.setting.manager.saveBackgroundUri
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.animation.core.*
+import androidx.compose.animation.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +70,7 @@ fun ChatScreen(
     vm: ChatViewModel = viewModel(factory = ChatViewModelFactory(publicId))
 ) {
     val messages by vm.messages.collectAsState()
+    val pending by vm.pendingMessages.collectAsState()
     val selected by vm.selected.collectAsState()
     val otherUser by vm.otherUser.collectAsState()
     val typingState by vm.typingState.collectAsState()
@@ -334,6 +352,22 @@ fun ChatScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                     }
+                    // 🕒 Pending delayed messages (shown as sending soon)
+                    items(
+                        items = pending.values.toList(),
+                        key = { it.localId } // each pending message has a unique ID
+                    ) { pendingMsg: PendingMessage ->
+                        PendingMessageBubble(
+                            pendingMsg = pendingMsg,
+                            onCancel = { vm.cancelPendingMessage(pendingMsg.localId) }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+
+
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+
                 }
 
                 // Input bar + typing handling
@@ -533,15 +567,253 @@ fun ChatScreen(
 
 
 
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+fun PendingMessageBubble(
+    pendingMsg: PendingMessage,
+    onCancel: () -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    val totalSeconds = pendingMsg.remainingSeconds.coerceAtLeast(1)
+    val remaining = pendingMsg.remainingSeconds.coerceIn(0, totalSeconds)
+    val progressTarget = 1f - ((remaining - 1f) / totalSeconds.toFloat())
+
+    // 🎞 Smooth continuous bar shrink
+    val animatedProgress by animateFloatAsState(
+        targetValue = progressTarget.coerceIn(0f, 1f),
+        animationSpec = tween(
+            durationMillis = (1000L * totalSeconds).toInt(),
+            easing = LinearEasing
+        ),
+        label = "SmoothProgressDynamic"
+    )
+
+    // 🟢 SafePlay colors
+    val accentColor = MaterialTheme.colorScheme.primary
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    val textColor = MaterialTheme.colorScheme.onSurface
+
+    // 🌈 Glow + shimmer infinite transitions
+    val infiniteTransition = rememberInfiniteTransition(label = "glowTransition")
+
+    // Soft breathing glow
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
+
+    // Horizontal shimmer (moving gradient)
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = -200f,
+        targetValue = 800f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse // 👈 shimmer bounces back
+        ),
+        label = "shimmerOffset"
+    )
+
+    // Gradient shimmer brush
+    val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+            accentColor.copy(alpha = glowAlpha * 0.3f),
+            accentColor.copy(alpha = 0.9f),
+            accentColor.copy(alpha = glowAlpha * 0.3f)
+        ),
+        start = Offset(shimmerOffset - 200f, 0f),
+        end = Offset(shimmerOffset + 200f, 0f)
+    )
+
+    // 🌙 Vanish on cancel or time out
+    var visible by remember { mutableStateOf(true) }
+    LaunchedEffect(pendingMsg.remainingSeconds) {
+        if (pendingMsg.remainingSeconds <= 0) visible = false
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(250)) + scaleIn(initialScale = 0.9f),
+        exit = fadeOut(tween(250)) + shrinkVertically(tween(300))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .background(bgColor, RoundedCornerShape(16.dp))
+                .padding(12.dp)
+        ) {
+            // 📝 Message preview text
+            Text(
+                text = pendingMsg.text,
+                color = textColor,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            // 🔹 Animated shimmer progress bar
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .background(
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
+                        RoundedCornerShape(50)
+                    )
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(animatedProgress)
+                        .height(6.dp)
+                        .background(shimmerBrush, RoundedCornerShape(50))
+                        .shadow(
+                            elevation = 10.dp,
+                            shape = RoundedCornerShape(50),
+                            ambientColor = accentColor.copy(alpha = glowAlpha * 0.6f),
+                            spotColor = accentColor.copy(alpha = glowAlpha * 0.6f)
+                        )
+                )
+            }
+
+            // Countdown + cancel button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Sending in ${pendingMsg.remainingSeconds}s...",
+                    color = textColor.copy(alpha = 0.7f),
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f)
+                )
+
+                TextButton(
+                    onClick = {
+                        // ✅ trigger gentle vibration
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                        // vanish instantly
+                        visible = false
+                        onCancel()
+                    }
+                )
+                {
+                    Text("✖ Cancel", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+
+//@OptIn(ExperimentalAnimationApi::class)
+//@Composable
+//fun PendingMessageBubble(
+//    pendingMsg: PendingMessage,
+//    onCancel: () -> Unit
+//) {
+//    val totalSeconds = 3f
+//    val remaining = pendingMsg.remainingSeconds.coerceIn(0, 3)
+//    val progressTarget = 1f - ((remaining - 1) / totalSeconds)
+//
+//    // 🎞 Smooth animation for progress line
+//    val animatedProgress by animateFloatAsState(
+//        targetValue = progressTarget.coerceIn(0f, 1f),
+//        animationSpec = tween(durationMillis = 800, easing = LinearEasing),
+//        label = "SmoothProgress"
+//    )
+//
+//    // 🔹 Fade + scale animation
+//    var visible by remember { mutableStateOf(true) }
+//    LaunchedEffect(pendingMsg.remainingSeconds) {
+//        if (pendingMsg.remainingSeconds <= 0) visible = false
+//    }
+//
+//    // 🟢 Get dynamic accent color from theme
+//    val accentColor = MaterialTheme.colorScheme.primary
+//    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+//    val textColor = MaterialTheme.colorScheme.onSurface
+//
+//    AnimatedVisibility(
+//        visible = visible,
+//        enter = fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.9f),
+//        exit = fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.8f)
+//    ) {
+//        Column(
+//            modifier = Modifier
+//                .fillMaxWidth()
+//                .padding(horizontal = 12.dp)
+//                .background(bgColor, RoundedCornerShape(16.dp))
+//                .padding(12.dp)
+//        ) {
+//            // 📝 Message text
+//            Text(
+//                text = pendingMsg.text,
+//                color = textColor,
+//                fontSize = 16.sp,
+//                modifier = Modifier.padding(bottom = 6.dp)
+//            )
+//
+//            // 🔹 Animated accent progress bar
+//            Box(
+//                Modifier
+//                    .fillMaxWidth()
+//                    .height(5.dp)
+//                    .background(
+//                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
+//                        RoundedCornerShape(50)
+//                    )
+//            ) {
+//                Box(
+//                    Modifier
+//                        .fillMaxWidth(animatedProgress)
+//                        .height(5.dp)
+//                        .background(accentColor, RoundedCornerShape(50))
+//                )
+//            }
+//
+//            // ⏳ Countdown and cancel
+//            Row(
+//                modifier = Modifier
+//                    .fillMaxWidth()
+//                    .padding(top = 6.dp),
+//                horizontalArrangement = Arrangement.End,
+//                verticalAlignment = Alignment.CenterVertically
+//            ) {
+//                Text(
+//                    text = "Sending in ${pendingMsg.remainingSeconds}s...",
+//                    color = textColor.copy(alpha = 0.7f),
+//                    fontSize = 13.sp,
+//                    modifier = Modifier.weight(1f)
+//                )
+//                TextButton(onClick = {
+//                    visible = false
+//                    onCancel()
+//                }) {
+//                    Text("✖ Cancel", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+//                }
+//            }
+//        }
+//    }
+//}
+//
+//
+//
+//
 
 
 
 
 
 
-
-
-
+//--------------------------------------------------------------------------------------------------------------
 
 
 

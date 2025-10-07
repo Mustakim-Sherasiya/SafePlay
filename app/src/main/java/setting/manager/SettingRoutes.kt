@@ -9,4 +9,9 @@ object SettingRoutes {
 
     const val CHAT_BACKGROUND = "settings_chat_background"
 
+    const val DELAY_CHAT = "settings_delay_chat"
+
+    const val ACCOUNT_DELETION = "settings_account_deletion"
+
+
 }

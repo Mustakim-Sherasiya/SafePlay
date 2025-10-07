@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
                             currentRoute != "adminGraph" &&
                             currentRoute != "profile" &&
                             currentRoute != "settings"&&
+                            currentRoute != "starredMessages" &&
                             currentRoute?.startsWith("chat/") == false
                         ) {
                             BottomNavigationBar(navController)

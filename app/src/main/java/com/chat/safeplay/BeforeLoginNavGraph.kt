@@ -18,8 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
+
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.ui.Alignment
@@ -36,13 +35,17 @@ import com.chat.safeplay.setting.manager.SettingsNavGraph
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 
-
-
+import com.google.accompanist.navigation.animation.composable
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import com.google.accompanist.navigation.animation.AnimatedNavHost
+import com.chat.safeplay.star.messages.StarredMessagesScreen
 
 // Import your PIN storage helper (implement separately)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
+
 fun BeforeLoginNavGraph(
     navController: NavHostController,
     startDestination: String,
@@ -53,14 +56,31 @@ fun BeforeLoginNavGraph(
     val lastVerificationEmailSentTime = remember { mutableStateOf(0L) }
     val lastResetEmailSentTime = remember { mutableStateOf(0L) }
 
-    NavHost(
+    AnimatedNavHost(
         navController = navController,
         startDestination = startDestination,
-        modifier = modifier
+        modifier = modifier,
+        // 👇 Optional default transitions for all screens
+        enterTransition = {
+            fadeIn(animationSpec = tween(300))
+        },
+        exitTransition = {
+            fadeOut(animationSpec = tween(300))
+        },
+        popEnterTransition = {
+            fadeIn(animationSpec = tween(300))
+        },
+        popExitTransition = {
+            fadeOut(animationSpec = tween(300))
+        }
     ) {
-        composable("home") { HomeScreen(navController) }
+        composable("home") {
+            HomeScreen(navController)
+        }
 
-        composable("gameSelection") { GameSelectionScreen(navController) }
+        composable("gameSelection") {
+            GameSelectionScreen(navController)
+        }
 
 
 
@@ -403,7 +423,37 @@ fun BeforeLoginNavGraph(
 
         // ... your existing composable("enterPin") { ... }
 
-        composable("UserDashboard") {
+
+        // *** ADD PIN RESET NAV GRAPH ***
+        composable("forgotPin") {
+            PinNavGraph(navController = navController)
+
+        }
+
+
+        composable(
+            route = "UserDashboard",
+            enterTransition = {
+                // When returning from Settings → Dashboard
+                slideInHorizontally(initialOffsetX = { -1000 }, animationSpec = tween(400)) +
+                        fadeIn(animationSpec = tween(400))
+            },
+            exitTransition = {
+                // When leaving Dashboard → Settings
+                slideOutHorizontally(targetOffsetX = { -1000 }, animationSpec = tween(400)) +
+                        fadeOut(animationSpec = tween(400))
+            },
+            popEnterTransition = {
+                // When coming back (pop) into Dashboard
+                slideInHorizontally(initialOffsetX = { 1000 }, animationSpec = tween(400)) +
+                        fadeIn(animationSpec = tween(400))
+            },
+            popExitTransition = {
+                // When going out from Dashboard backwards (if needed)
+                slideOutHorizontally(targetOffsetX = { 1000 }, animationSpec = tween(400)) +
+                        fadeOut(animationSpec = tween(400))
+            }
+        ) {
             val currentUser = FirebaseAuth.getInstance().currentUser
             val currentUserUid = currentUser?.uid ?: ""
 
@@ -413,25 +463,84 @@ fun BeforeLoginNavGraph(
             )
         }
 
-
-        // *** ADD PIN RESET NAV GRAPH ***
-        composable("forgotPin") {
-            PinNavGraph(navController = navController)
-
-        }
-        composable(ProfileRoutes.PROFILE) {
+        composable(
+            route = ProfileRoutes.PROFILE,
+            enterTransition = {
+                fadeIn(animationSpec = tween(400)) + scaleIn(initialScale = 0.9f, animationSpec = tween(400))
+            },
+            exitTransition = {
+                fadeOut(animationSpec = tween(400)) + scaleOut(targetScale = 1.05f, animationSpec = tween(400))
+            },
+            popEnterTransition = {
+                fadeIn(animationSpec = tween(400)) + scaleIn(initialScale = 0.9f, animationSpec = tween(400))
+            },
+            popExitTransition = {
+                fadeOut(animationSpec = tween(400)) + scaleOut(targetScale = 1.05f, animationSpec = tween(400))
+            }
+        ) {
             ProfileScreen(navController = navController)
         }
 
-
-        composable(SettingRoutes.SETTINGS) {
-            // Load the full SettingsNavGraph inside this route
+        composable(
+            route = SettingRoutes.SETTINGS,
+            enterTransition = {
+                // Opening Settings → slide in + fade
+                slideInHorizontally(initialOffsetX = { 1000 }, animationSpec = tween(400)) +
+                        fadeIn(animationSpec = tween(400))
+            },
+            exitTransition = {
+                // Leaving Settings → slide out reverse
+                slideOutHorizontally(targetOffsetX = { -1000 }, animationSpec = tween(400)) +
+                        fadeOut(animationSpec = tween(400))
+            },
+            popEnterTransition = {
+                // Coming back to Settings (rare)
+                slideInHorizontally(initialOffsetX = { -1000 }, animationSpec = tween(400)) +
+                        fadeIn(animationSpec = tween(400))
+            },
+            popExitTransition = {
+                // Back to Dashboard
+                slideOutHorizontally(targetOffsetX = { 1000 }, animationSpec = tween(400)) +
+                        fadeOut(animationSpec = tween(400))
+            }
+        ) {
             SettingsNavGraph(
                 onBackToDashboard = {
                     navController.popBackStack("UserDashboard", false)
                 }
             )
         }
+
+
+// *** ADD STARRED MESSAGES NAV GRAPH ***
+        composable(
+            route = "starredMessages",
+            enterTransition = {
+                // From Dashboard → Starred Messages
+                slideInHorizontally(initialOffsetX = { 1000 }, animationSpec = tween(400)) +
+                        fadeIn(animationSpec = tween(400))
+            },
+            exitTransition = {
+                // Leaving Starred Messages → Dashboard
+                slideOutHorizontally(targetOffsetX = { -1000 }, animationSpec = tween(400)) +
+                        fadeOut(animationSpec = tween(400))
+            },
+            popEnterTransition = {
+                // Coming back into Starred Messages (pop)
+                slideInHorizontally(initialOffsetX = { -1000 }, animationSpec = tween(400)) +
+                        fadeIn(animationSpec = tween(400))
+            },
+            popExitTransition = {
+                // Back navigation → Dashboard
+                slideOutHorizontally(targetOffsetX = { 1000 }, animationSpec = tween(400)) +
+                        fadeOut(animationSpec = tween(400))
+            }
+        ) {
+            StarredMessagesScreen(navController = navController)
+        }
+
+
+
 
 //
 //        composable(ProfileRoutes.STARRED) {

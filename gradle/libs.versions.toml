@@ -15,6 +15,7 @@ compose-material-icons = "1.5.0"
 
 # 🔹 only keep the BoM version, remove the other firebase versions
 firebaseBom = "33.1.0"
+roomKtx = "2.8.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -43,6 +44,7 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-storage-ktx = { module = "com.google.firebase:firebase-storage-ktx" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-storage = { module = "com.google.firebase:firebase-storage" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "roomKtx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

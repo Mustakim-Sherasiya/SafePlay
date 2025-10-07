@@ -1,11 +1,26 @@
 package com.chat.safeplay.profile
 
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,11 +50,26 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavHostController
+
+
+
+
+
+
+
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +86,9 @@ fun ProfileScreen(navController: NavHostController) {
     var showDisplayName by remember { mutableStateOf(false) }
     var publicId by remember { mutableStateOf("Loading...") }
     var photoMenuExpanded by remember { mutableStateOf(false) }
-
+// 🔹 Upload animation states
+    var isUploading by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableStateOf(0f) }
 
 
     LaunchedEffect(Unit) {
@@ -89,7 +121,7 @@ fun ProfileScreen(navController: NavHostController) {
     }
 
 
-    // Image picker
+    // 🔹 Image picker with animated upload progress
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -101,7 +133,6 @@ fun ProfileScreen(navController: NavHostController) {
             }
 
             try {
-                // get mime type if available
                 val contentType = context.contentResolver.getType(selectedUri) ?: "image/jpeg"
                 val metadata = com.google.firebase.storage.StorageMetadata.Builder()
                     .setContentType(contentType)
@@ -110,37 +141,61 @@ fun ProfileScreen(navController: NavHostController) {
                 val ref = storage.reference.child("profile_photos/$currentUid/profile.jpg")
                 val uploadTask = ref.putFile(selectedUri, metadata)
 
-                // optional: show progress to user
+                // 1️⃣ Track upload progress
                 uploadTask.addOnProgressListener { taskSnapshot ->
                     val bytesTransferred = taskSnapshot.bytesTransferred
                     val totalBytes = taskSnapshot.totalByteCount
-                    val progress = if (totalBytes > 0) (100.0 * bytesTransferred / totalBytes).toInt() else 0
-                    // lightweight feedback — replace with Snackbar/ProgressBar in your UI if you want
-                    Toast.makeText(context, "Uploading $progress%", Toast.LENGTH_SHORT).show()
+                    val progress = if (totalBytes > 0)
+                        bytesTransferred.toFloat() / totalBytes.toFloat()
+                    else 0f
+
+                    // ✅ Ensure Compose recomposes on main thread
+                    Handler(Looper.getMainLooper()).post {
+                        isUploading = true
+                        uploadProgress = progress
+                    }
+
+                    println("🔹 Upload progress: ${(progress * 100).toInt()}%")
                 }
 
-                uploadTask
-                    .addOnSuccessListener {
-                        // get download url and save to Firestore
-                        ref.downloadUrl.addOnSuccessListener { downloadUri ->
-                            profilePhotoUrl = downloadUri.toString()
-                            db.collection("users").document(currentUid)
-                                .set(mapOf("photoUrl" to profilePhotoUrl), SetOptions.merge())
-                                .addOnSuccessListener {
-                                    Toast.makeText(context, "Profile photo updated", Toast.LENGTH_SHORT).show()
-                                }
-                                .addOnFailureListener { e ->
-                                    Toast.makeText(context, "Saved URL failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                        }.addOnFailureListener { e ->
-                            Toast.makeText(context, "Failed to get download URL: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
+                // 2️⃣ On success → complete animation first, then fade out
+                uploadTask.addOnSuccessListener {
+                    Handler(Looper.getMainLooper()).post {
+                        uploadProgress = 1f
                     }
-                    .addOnFailureListener { e ->
-                        Toast.makeText(context, "Upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+
+                    // Small visual delay so the ring finishes & fades out smoothly
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        isUploading = false
+                    }, 700)
+
+                    // Save photo to Firestore
+                    ref.downloadUrl.addOnSuccessListener { downloadUri ->
+                        profilePhotoUrl = downloadUri.toString()
+
+                        db.collection("users").document(currentUid)
+                            .set(mapOf("photoUrl" to profilePhotoUrl), SetOptions.merge())
+                            .addOnSuccessListener {
+                                println("✅ Profile photo updated successfully")
+                            }
+                            .addOnFailureListener { e ->
+                                println("⚠️ Firestore update failed: ${e.message}")
+                            }
+                    }.addOnFailureListener { e ->
+                        isUploading = false
+                        println("⚠️ Failed to get download URL: ${e.message}")
                     }
+                }
+
+                // 3️⃣ On failure → hide animation
+                uploadTask.addOnFailureListener { e ->
+                    isUploading = false
+                    println("⚠️ Upload failed: ${e.message}")
+                }
+
             } catch (e: Exception) {
-                Toast.makeText(context, "Upload error: ${e.message}", Toast.LENGTH_LONG).show()
+                isUploading = false
+                println("⚠️ Upload error: ${e.message}")
             }
         }
     }
@@ -175,7 +230,7 @@ fun ProfileScreen(navController: NavHostController) {
                             ) {
                                 // VideoLogo should be small and fill the inner box
                                 VideoLogo(
-                                    resId = R.raw.small_live_logo,
+                                    resId = R.raw.profile_logo,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -244,6 +299,24 @@ fun ProfileScreen(navController: NavHostController) {
                     }
 
                 }
+
+
+                // 🌈 Animated glowing ring overlay during upload
+                if (isUploading) {
+                    Box(
+                        modifier = Modifier
+                            .size(195.dp)
+                            .align(Alignment.Center)
+                            .zIndex(2f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AnimatedCircularProgressRing(progress = uploadProgress)
+                    }
+                }
+
+
+
+
 
                 Box(
                     modifier = Modifier
@@ -592,15 +665,80 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
     )
 }
 
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+fun AnimatedCircularProgressRing(progress: Float) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 250, easing = LinearEasing),
+        label = "uploadProgress"
+    )
 
+    // SafePlay glow color (bright cyan)
+    val accent = Color(0xFF00E5FF)
 
+    // Infinite transitions for glow + rotation
+    val infiniteTransition = rememberInfiniteTransition(label = "halo")
 
+    // Pulsing glow intensity
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
 
+    // Continuous rotation
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotationAngle"
+    )
 
+    // Cyan gradient shimmer for ring
+    val brush = Brush.sweepGradient(
+        listOf(
+            accent.copy(alpha = 0.3f),
+            accent.copy(alpha = 1f),
+            accent.copy(alpha = 0.4f)
+        )
+    )
 
+    Box(
+        modifier = Modifier
+            .size(190.dp)
+            .graphicsLayer { rotationZ = rotationAngle },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // Outer soft glow
+            drawArc(
+                color = accent.copy(alpha = 0.3f * glowAlpha),
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                style = Stroke(width = 22f, cap = StrokeCap.Round)
+            )
 
-
-
+            // Main animated bright ring
+            drawArc(
+                brush = brush,
+                startAngle = -90f,
+                sweepAngle = 360f * animatedProgress,
+                useCenter = false,
+                style = Stroke(width = 10f, cap = StrokeCap.Round),
+                alpha = glowAlpha
+            )
+        }
+    }
+}
 
 
 
@@ -610,6 +748,7 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //import android.net.Uri
 //import android.view.ViewGroup
 //import android.widget.FrameLayout
+//import android.widget.Toast
 //import androidx.activity.compose.rememberLauncherForActivityResult
 //import androidx.activity.result.contract.ActivityResultContracts
 //import androidx.compose.foundation.Image
@@ -625,28 +764,27 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //import androidx.compose.ui.Alignment
 //import androidx.compose.ui.Modifier
 //import androidx.compose.ui.draw.clip
+//import androidx.compose.ui.layout.ContentScale
 //import androidx.compose.ui.platform.LocalContext
 //import androidx.compose.ui.res.painterResource
+//import androidx.compose.ui.text.font.FontWeight
 //import androidx.compose.ui.text.input.TextFieldValue
 //import androidx.compose.ui.unit.dp
+//import androidx.compose.ui.unit.sp
 //import androidx.compose.ui.viewinterop.AndroidView
 //import coil.compose.rememberAsyncImagePainter
+//import com.chat.safeplay.R
 //import com.google.firebase.auth.FirebaseAuth
-//import com.google.firebase.storage.FirebaseStorage
 //import com.google.firebase.firestore.FirebaseFirestore
 //import com.google.firebase.firestore.SetOptions
-//import com.chat.safeplay.R
+//import com.google.firebase.storage.FirebaseStorage
 //import androidx.compose.runtime.Composable
 //import androidx.compose.runtime.DisposableEffect
+//import androidx.compose.ui.graphics.Color
 //import androidx.media3.common.MediaItem
 //import androidx.media3.exoplayer.ExoPlayer
 //import androidx.media3.ui.PlayerView
 //import androidx.navigation.NavHostController
-//import android.widget.Toast
-//import androidx.compose.ui.graphics.Color
-//import androidx.compose.ui.layout.ContentScale
-//import androidx.compose.ui.unit.sp
-//import androidx.compose.ui.text.font.FontWeight
 //
 //@OptIn(ExperimentalMaterial3Api::class)
 //@Composable
@@ -657,11 +795,44 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //    val storage = FirebaseStorage.getInstance()
 //
 //    var profilePhotoUrl by remember { mutableStateOf<String?>(null) }
-//    var name by remember { mutableStateOf(TextFieldValue("Muju")) }
-//    var gender by remember { mutableStateOf("Male/Female") }
-//    var about by remember { mutableStateOf(TextFieldValue("SafePlay is a app where you can play safely while chatting with other person.")) }
-//    var showDisplayName by remember { mutableStateOf(true) }
-//    val uid = auth.currentUser?.uid ?: "A1B2C3" // fallback shown in screenshot
+//    var name by remember { mutableStateOf(TextFieldValue("Loading...")) }
+//    var gender by remember { mutableStateOf("Loading...") }
+//    var about by remember { mutableStateOf(TextFieldValue("Loading....")) }
+//    var showDisplayName by remember { mutableStateOf(false) }
+//    var publicId by remember { mutableStateOf("Loading...") }
+//    var photoMenuExpanded by remember { mutableStateOf(false) }
+//
+//
+//
+//    LaunchedEffect(Unit) {
+//        auth.currentUser?.uid?.let { currentUid ->
+//            db.collection("users").document(currentUid).get()
+//                .addOnSuccessListener { snapshot ->
+//                    if (snapshot != null && snapshot.exists()) {
+//                        publicId = snapshot.getString("publicId") ?: currentUid
+//                    }
+//                }
+//        }
+//    }
+//    // Load saved data from Firestore when screen opens
+//    LaunchedEffect(Unit) {
+//        auth.currentUser?.uid?.let { currentUid ->
+//            db.collection("users").document(currentUid).get()
+//                .addOnSuccessListener { snapshot ->
+//                    if (snapshot != null && snapshot.exists()) {
+//                        profilePhotoUrl = snapshot.getString("photoUrl")
+//                        name = TextFieldValue(snapshot.getString("name") ?: "")
+//                        gender = snapshot.getString("gender") ?: ""
+//                        about = TextFieldValue(snapshot.getString("about") ?: "")
+//                        showDisplayName = snapshot.getBoolean("showDisplayName") ?: true
+//                    }
+//                }
+//                .addOnFailureListener {
+//                    Toast.makeText(context, "Failed to load profile", Toast.LENGTH_SHORT).show()
+//                }
+//        }
+//    }
+//
 //
 //    // Image picker
 //    val launcher = rememberLauncherForActivityResult(
@@ -673,35 +844,96 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
 //                return@let
 //            }
-//            val ref = storage.reference.child("profile_photos/$currentUid.jpg")
-//            ref.putFile(selectedUri).addOnSuccessListener {
-//                ref.downloadUrl.addOnSuccessListener { downloadUri ->
-//                    profilePhotoUrl = downloadUri.toString()
-//                    db.collection("users").document(currentUid)
-//                        .set(mapOf("photoUrl" to profilePhotoUrl), SetOptions.merge())
+//
+//            try {
+//                // get mime type if available
+//                val contentType = context.contentResolver.getType(selectedUri) ?: "image/jpeg"
+//                val metadata = com.google.firebase.storage.StorageMetadata.Builder()
+//                    .setContentType(contentType)
+//                    .build()
+//
+//                val ref = storage.reference.child("profile_photos/$currentUid/profile.jpg")
+//                val uploadTask = ref.putFile(selectedUri, metadata)
+//
+//                // optional: show progress to user
+//                uploadTask.addOnProgressListener { taskSnapshot ->
+//                    val bytesTransferred = taskSnapshot.bytesTransferred
+//                    val totalBytes = taskSnapshot.totalByteCount
+//                    val progress = if (totalBytes > 0) (100.0 * bytesTransferred / totalBytes).toInt() else 0
+//                    // lightweight feedback — replace with Snackbar/ProgressBar in your UI if you want
+//                    Toast.makeText(context, "Uploading $progress%", Toast.LENGTH_SHORT).show()
 //                }
-//            }.addOnFailureListener {
-//                Toast.makeText(context, "Upload failed", Toast.LENGTH_SHORT).show()
+//
+//                uploadTask
+//                    .addOnSuccessListener {
+//                        // get download url and save to Firestore
+//                        ref.downloadUrl.addOnSuccessListener { downloadUri ->
+//                            profilePhotoUrl = downloadUri.toString()
+//                            db.collection("users").document(currentUid)
+//                                .set(mapOf("photoUrl" to profilePhotoUrl), SetOptions.merge())
+//                                .addOnSuccessListener {
+//                                    Toast.makeText(context, "Profile photo updated", Toast.LENGTH_SHORT).show()
+//                                }
+//                                .addOnFailureListener { e ->
+//                                    Toast.makeText(context, "Saved URL failed: ${e.message}", Toast.LENGTH_SHORT).show()
+//                                }
+//                        }.addOnFailureListener { e ->
+//                            Toast.makeText(context, "Failed to get download URL: ${e.message}", Toast.LENGTH_SHORT).show()
+//                        }
+//                    }
+//                    .addOnFailureListener { e ->
+//                        Toast.makeText(context, "Upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+//                    }
+//            } catch (e: Exception) {
+//                Toast.makeText(context, "Upload error: ${e.message}", Toast.LENGTH_LONG).show()
 //            }
 //        }
 //    }
 //
-//    // editing state for name and about
-//    var editingName by remember { mutableStateOf(false) }
-//    var nameBuffer by remember { mutableStateOf(name.text) }
-//    var editingAbout by remember { mutableStateOf(false) }
-//    var aboutBuffer by remember { mutableStateOf(about.text) }
 //
-//    // Use Scaffold so the top app bar doesn't push content with extra gap
+//    // editing state
+//    var editingName by remember { mutableStateOf(false) }
+//    var nameBuffer by remember { mutableStateOf(name) } // TextFieldValue
+//
+//    var editingAbout by remember { mutableStateOf(false) }
+//    var aboutBuffer by remember { mutableStateOf(about) } // TextFieldValue
+//
 //    Scaffold(
 //        topBar = {
 //            SmallTopAppBar(
 //                title = {
 //                    Row(verticalAlignment = Alignment.CenterVertically) {
-//                        // small live logo near title (use a small video resource or drawable)
-//                        VideoLogo(resId = R.raw.small_live_logo, modifier = Modifier.size(22.dp))
+//                        // Circular container for the live video logo
+//                        Surface(
+//                            modifier = Modifier.size(45.dp),        // outer circle size
+//                            shape = CircleShape,
+//                            color = Color.White.copy(alpha = 0.06f), // subtle background for contrast
+//                            tonalElevation = 0.dp
+//                        ) {
+//                            // Keep some padding so the video doesn't touch the edge
+//                            Box(
+//                                modifier = Modifier
+//                                    .fillMaxSize()
+//                                    .padding(4.dp)
+//                                    .clip(CircleShape),
+//                                contentAlignment = Alignment.Center
+//                            ) {
+//                                // VideoLogo should be small and fill the inner box
+//                                VideoLogo(
+//                                    resId = R.raw.profile_logo,
+//                                    modifier = Modifier.fillMaxSize()
+//                                )
+//                            }
+//                        }
+//
 //                        Spacer(Modifier.width(8.dp))
-//                        Text("SafePlay", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+//
+//                        Text(
+//                            "SafePlay",
+//                            color = Color.White,
+//                            fontSize = 18.sp,
+//                            fontWeight = FontWeight.SemiBold
+//                        )
 //                    }
 //                },
 //                navigationIcon = {
@@ -709,62 +941,147 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
 //                    }
 //                },
-//                actions = {
-//                    // optional action (empty)
-//                },
 //                colors = TopAppBarDefaults.smallTopAppBarColors(containerColor = Color.Transparent)
 //            )
 //        },
-//        containerColor = Color(0xFF0F0F0F) // dark background kept
-//    ) { innerPadding ->
+//        containerColor = Color(0xFF0F0F0F)
+//    ) {innerPadding ->
 //        Column(
 //            modifier = Modifier
 //                .fillMaxSize()
-//                .padding(innerPadding), // ensures content starts just below the app bar with no extra gap
+//                .padding(innerPadding),
 //            horizontalAlignment = Alignment.CenterHorizontally,
 //            verticalArrangement = Arrangement.Top
 //        ) {
-//
-//            // center big profile avatar with big white circle behind (like screenshot)
+//            // Avatar
 //            Box(
 //                modifier = Modifier
 //                    .fillMaxWidth()
-//                    .padding(bottom = 8.dp), // no top padding here — app bar spacing handled by innerPadding
+//                    .padding(bottom = 8.dp),
 //                contentAlignment = Alignment.Center
 //            ) {
-//                // White circular background
 //                Surface(
 //                    modifier = Modifier.size(160.dp),
 //                    shape = CircleShape,
 //                    color = Color.White,
 //                    shadowElevation = 4.dp
 //                ) {
-//                    // profile image inside white circle
-//                    Image(
-//                        painter = rememberAsyncImagePainter(profilePhotoUrl ?: "https://your-default-app-logo.png"),
-//                        contentDescription = "Profile Photo",
-//                        modifier = Modifier
-//                            .fillMaxSize()
-//                            .clip(CircleShape)
-//                            .clickable { launcher.launch("image/*") },
-//                        contentScale = ContentScale.Crop
-//                    )
+//                    if (!profilePhotoUrl.isNullOrEmpty()) {
+//                        // Show uploaded profile photo
+//                        Image(
+//                            painter = rememberAsyncImagePainter(profilePhotoUrl),
+//                            contentDescription = "Profile Photo",
+//                            modifier = Modifier
+//                                .fillMaxSize()
+//                                .clip(CircleShape),
+//                            contentScale = ContentScale.Crop
+//                        )
+//                    } else {
+//                        // Show SafePlay logo fallback
+//                        Image(
+//                            painter = painterResource(id = R.drawable.safeplay_logo),
+//                            contentDescription = "Default Profile",
+//                            modifier = Modifier
+//                                .fillMaxSize()
+//                                .clip(CircleShape),
+//                            contentScale = ContentScale.Crop
+//                        )
+//                    }
+//
 //                }
 //
-//                // small edit icon overlay bottom-right
-//                IconButton(
-//                    onClick = { launcher.launch("image/*") },
+//                Box(
 //                    modifier = Modifier
 //                        .align(Alignment.BottomEnd)
 //                        .offset(x = (-8).dp, y = (-4).dp)
-//                        .size(36.dp)
-//                        .background(Color(0xFF1F1F1F), CircleShape)
 //                ) {
-//                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.White)
+//                    IconButton(
+//                        onClick = { photoMenuExpanded = true },
+//                        modifier = Modifier
+//                            .size(36.dp)
+//                            .background(Color(0xFF1F1F1F), CircleShape)
+//                    ) {
+//                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.White)
+//                    }
+//
+//                    DropdownMenu(
+//                        expanded = photoMenuExpanded,
+//                        onDismissRequest = { photoMenuExpanded = false }
+//                    ) {
+//                        DropdownMenuItem(
+//                            text = { Text("Change Photo") },
+//                            onClick = {
+//                                photoMenuExpanded = false
+//                                launcher.launch("image/*")
+//                            }
+//                        )
+//                        DropdownMenuItem(
+//                            text = { Text("Remove Photo") },
+//                            onClick = {
+//                                photoMenuExpanded = false
+//                                val currentUid = auth.currentUser?.uid ?: return@DropdownMenuItem
+//
+//                                val ref = storage.reference.child("profile_photos/$currentUid/profile.jpg")
+//                                ref.delete()
+//                                    .addOnSuccessListener {
+//                                        db.collection("users").document(currentUid)
+//                                            .set(mapOf("photoUrl" to null), SetOptions.merge())
+//                                        profilePhotoUrl = null
+//                                        Toast.makeText(context, "Profile photo removed", Toast.LENGTH_SHORT).show()
+//                                    }
+//                                    .addOnFailureListener { e ->
+//                                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+//                                    }
+//                            }
+//                        )
+//                    }
+//                }
+//
+//            }
+//
+//
+//
+//
+//
+//            // small space between avatar and the display name
+//            Spacer(modifier = Modifier.height(8.dp))
+//
+//            // ---------------- Display name (either user name or generated UserXX) ----------------
+//            val computedDisplayName: String = remember(name.text, publicId, showDisplayName) {
+//                if (showDisplayName && name.text.isNotBlank()) {
+//                    name.text
+//                } else {
+//                    // fallback: last 2 chars of publicId (or uid)
+//                    val id = publicId.ifBlank { auth.currentUser?.uid ?: "" }
+//                    val suffix = if (id.length >= 2) id.takeLast(2) else id
+//                    "User${suffix.uppercase()}"
 //                }
 //            }
 //
-//            // Content card that contains the fields (dark gray card)
+//            Text(
+//                text = computedDisplayName,
+//                color = Color.White,
+//                fontSize = 18.sp,
+//                fontWeight = FontWeight.SemiBold,
+//                modifier = Modifier
+//                    .padding(top = 6.dp, bottom = 6.dp)
+//                    .clickable {
+//                        // reuse your existing edit flow: open name editor
+//                        nameBuffer = name
+//                        editingName = true
+//                    }
+//            )
+//            // -------------------------------------------------------------------------------------
+//
+//
+//
+//
+//            // small extra spacing before content card
+//            Spacer(modifier = Modifier.height(12.dp))
+//
+//
+//
+//            // Content card
 //            Surface(
 //                modifier = Modifier
 //                    .fillMaxWidth()
@@ -774,20 +1091,20 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                tonalElevation = 2.dp
 //            ) {
 //                Column(modifier = Modifier.padding(12.dp)) {
-//                    // UID row (row style matches screenshot)
+//                    // UID
 //                    ProfileRow(
 //                        logoRes = R.raw.uid_logo,
 //                        content = {
 //                            Column {
 //                                Text("UID", color = Color.LightGray, fontSize = 12.sp)
 //                                Spacer(Modifier.height(2.dp))
-//                                Text(uid, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+//                                Text(publicId, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
 //                            }
 //                        }
 //                    )
 //                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
 //
-//                    // Name row (editable)
+//                    // Name
 //                    ProfileRow(
 //                        logoRes = R.raw.name_logo,
 //                        content = {
@@ -798,8 +1115,8 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                        Spacer(Modifier.height(2.dp))
 //                                        if (editingName) {
 //                                            OutlinedTextField(
-//                                                value = TextFieldValue(nameBuffer),
-//                                                onValueChange = { nameBuffer = it.text },
+//                                                value = nameBuffer,
+//                                                onValueChange = { nameBuffer = it },
 //                                                singleLine = true,
 //                                                modifier = Modifier.fillMaxWidth(),
 //                                                colors = TextFieldDefaults.outlinedTextFieldColors(
@@ -810,9 +1127,7 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                                    unfocusedTextColor = Color.White,
 //                                                    cursorColor = Color.White
 //                                                )
-//
 //                                            )
-//
 //                                        } else {
 //                                            Text(name.text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
 //                                        }
@@ -821,15 +1136,16 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                    if (editingName) {
 //                                        Button(onClick = {
 //                                            val currentUid = auth.currentUser?.uid ?: return@Button
-//                                            name = TextFieldValue(nameBuffer)
+//                                            name = nameBuffer
 //                                            db.collection("users").document(currentUid)
 //                                                .set(mapOf("name" to name.text), SetOptions.merge())
 //                                            editingName = false
-//                                        }) {
-//                                            Text("Save")
-//                                        }
+//                                        }) { Text("Save") }
 //                                    } else {
-//                                        IconButton(onClick = { editingName = true }) {
+//                                        IconButton(onClick = {
+//                                            nameBuffer = name
+//                                            editingName = true
+//                                        }) {
 //                                            Icon(Icons.Default.Edit, contentDescription = "Edit name", tint = Color.White)
 //                                        }
 //                                    }
@@ -839,7 +1155,7 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                    )
 //                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
 //
-//                    // Display name toggle row
+//                    // Display name toggle
 //                    ProfileRow(
 //                        logoRes = R.raw.toggle_logo,
 //                        content = {
@@ -847,7 +1163,11 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                Column(modifier = Modifier.weight(1f)) {
 //                                    Text("Display name", color = Color.LightGray, fontSize = 12.sp)
 //                                    Spacer(Modifier.height(2.dp))
-//                                    Text(if (showDisplayName) "Display name is ON" else "Display name is OFF", color = Color.White, fontSize = 14.sp)
+//                                    Text(
+//                                        if (showDisplayName) "Display name is ON" else "Display name is OFF",
+//                                        color = Color.White,
+//                                        fontSize = 14.sp
+//                                    )
 //                                }
 //                                Switch(checked = showDisplayName, onCheckedChange = {
 //                                    showDisplayName = it
@@ -861,7 +1181,7 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                    )
 //                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
 //
-//                    // Gender row (dropdown)
+//                    // Gender
 //                    ProfileRow(
 //                        logoRes = R.raw.gender_logo,
 //                        content = {
@@ -892,21 +1212,15 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                    ),
 //                                    modifier = Modifier.fillMaxWidth()
 //                                )
-//                                DropdownMenu(
-//                                    expanded = expanded,
-//                                    onDismissRequest = { expanded = false }
-//                                ) {
+//                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
 //                                    listOf("Male", "Female", "Other").forEach { option ->
 //                                        DropdownMenuItem(
 //                                            text = { Text(option) },
 //                                            onClick = {
 //                                                gender = option
 //                                                expanded = false
-//                                                // save to Firestore
-//                                                FirebaseAuth.getInstance().currentUser?.uid?.let { currentUid ->
-//                                                    FirebaseFirestore.getInstance()
-//                                                        .collection("users")
-//                                                        .document(currentUid)
+//                                                auth.currentUser?.uid?.let { currentUid ->
+//                                                    db.collection("users").document(currentUid)
 //                                                        .set(mapOf("gender" to option), SetOptions.merge())
 //                                                }
 //                                            }
@@ -916,10 +1230,9 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                            }
 //                        }
 //                    )
-//
 //                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
 //
-//                    // About row (editable multi-line)
+//                    // About
 //                    ProfileRow(
 //                        logoRes = R.raw.about_logo,
 //                        content = {
@@ -928,8 +1241,8 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                Spacer(Modifier.height(4.dp))
 //                                if (editingAbout) {
 //                                    OutlinedTextField(
-//                                        value = TextFieldValue(aboutBuffer),
-//                                        onValueChange = { aboutBuffer = it.text },
+//                                        value = aboutBuffer,
+//                                        onValueChange = { aboutBuffer = it },
 //                                        modifier = Modifier.fillMaxWidth(),
 //                                        colors = TextFieldDefaults.outlinedTextFieldColors(
 //                                            focusedBorderColor = Color.Gray,
@@ -942,15 +1255,13 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                    )
 //                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
 //                                        Button(onClick = {
-//                                            about = TextFieldValue(aboutBuffer)
+//                                            about = aboutBuffer
 //                                            auth.currentUser?.uid?.let { currentUid ->
 //                                                db.collection("users").document(currentUid)
 //                                                    .set(mapOf("about" to about.text), SetOptions.merge())
 //                                            }
 //                                            editingAbout = false
-//                                        }) {
-//                                            Text("Save")
-//                                        }
+//                                        }) { Text("Save") }
 //                                    }
 //                                } else {
 //                                    Text(
@@ -958,7 +1269,10 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //                                        color = Color.White,
 //                                        modifier = Modifier
 //                                            .fillMaxWidth()
-//                                            .clickable { editingAbout = true }
+//                                            .clickable {
+//                                                aboutBuffer = about
+//                                                editingAbout = true
+//                                            }
 //                                    )
 //                                }
 //                            }
@@ -974,25 +1288,27 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //    }
 //}
 //
-///** Reusable row with left animated logo and right content **/
+///** Reusable row **/
+//
 //@Composable
 //fun ProfileRow(logoRes: Int, content: @Composable () -> Unit) {
-//    Row(
-//        modifier = Modifier.fillMaxWidth(),
-//        verticalAlignment = Alignment.CenterVertically
-//    ) {
-//        // left logo box
+//    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
 //        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-//            VideoLogo(resId = logoRes, modifier = Modifier.size(36.dp))
+//            Surface(
+//                shape = CircleShape,
+//                color = Color(0xFF2A2A2A),
+//                modifier = Modifier.size(40.dp)
+//            ) {
+//                VideoLogo(resId = logoRes, modifier = Modifier.fillMaxSize())
+//            }
 //        }
 //        Spacer(Modifier.width(10.dp))
-//        Box(modifier = Modifier.weight(1f)) {
-//            content()
-//        }
+//        Box(modifier = Modifier.weight(1f)) { content() }
 //    }
 //}
 //
-///** Safer VideoLogo that releases ExoPlayer when disposed (keeps your current approach) **/
+//
+///** Video logo **/
 //@Composable
 //fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //    val context = LocalContext.current
@@ -1005,11 +1321,7 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //            prepare()
 //        }
 //    }
-//
-//    DisposableEffect(player) {
-//        onDispose { player.release() }
-//    }
-//
+//    DisposableEffect(player) { onDispose { player.release() } }
 //    AndroidView(
 //        factory = {
 //            PlayerView(context).apply {
@@ -1025,12 +1337,4 @@ fun VideoLogo(resId: Int, modifier: Modifier = Modifier) {
 //    )
 //}
 //
-
-
-
-
-
-
-
-
-
+//

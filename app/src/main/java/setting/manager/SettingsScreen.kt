@@ -22,15 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavHostController
 import com.chat.safeplay.R
-import android.view.View
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
@@ -65,6 +60,17 @@ fun SettingsScreen(
             SmallTopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+
+
+
+                        Text(
+                            "SafePlay",
+                            color = Color.White,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Spacer(Modifier.width(8.dp))
                         // Circular container for the live mini-logo, same style as your ProfileScreen
                         Surface(
                             modifier = Modifier.size(48.dp), // match ProfileScreen outer size
@@ -81,19 +87,13 @@ fun SettingsScreen(
                             ) {
                                 // VideoLogo from your ProfileScreen (uses ExoPlayer Media3)
                                 VideoLogo(
-                                    resId = R.raw.small_live_logo, // replace with your top-bar mp4 raw file
+                                    resId = R.raw.setting_logo, // replace with your top-bar mp4 raw file
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
                         }
 
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "SafePlay",
-                            color = Color.White,
-                            fontSize = 19.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+
                     }
                 },
                 navigationIcon = {

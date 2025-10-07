@@ -460,7 +460,8 @@ fun UserDashboardScreen(
                                         text = { Text("Starred") },
                                         onClick = {
                                             profileMenuExpanded = false
-                                            Toast.makeText(context, "Starred clicked", Toast.LENGTH_SHORT).show()
+                                            navController.navigate("starredMessages")
+
                                         }
                                     )
                                     Divider()
