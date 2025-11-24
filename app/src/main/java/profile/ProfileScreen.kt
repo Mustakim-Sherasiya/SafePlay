@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -20,12 +21,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
@@ -50,6 +55,7 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
@@ -78,6 +84,7 @@ fun ProfileScreen(navController: NavHostController) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
     val storage = FirebaseStorage.getInstance()
+
 
     var profilePhotoUrl by remember { mutableStateOf<String?>(null) }
     var name by remember { mutableStateOf(TextFieldValue("Loading...")) }
@@ -202,11 +209,24 @@ fun ProfileScreen(navController: NavHostController) {
 
 
     // editing state
-    var editingName by remember { mutableStateOf(false) }
-    var nameBuffer by remember { mutableStateOf(name) } // TextFieldValue
 
-    var editingAbout by remember { mutableStateOf(false) }
-    var aboutBuffer by remember { mutableStateOf(about) } // TextFieldValue
+    var editingName by rememberSaveable { mutableStateOf(false) }
+    var nameBuffer by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(name) }
+
+    var editingAbout by rememberSaveable { mutableStateOf(false) }
+    var aboutBuffer by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(about) }
+
+
+
+
+//    var editingName by remember { mutableStateOf(false) }
+//    var nameBuffer by remember { mutableStateOf(name) } // TextFieldValue
+//
+//    var editingAbout by remember { mutableStateOf(false) }
+//    var aboutBuffer by remember { mutableStateOf(about) } // TextFieldValue
+
+    val visibleState = remember { MutableTransitionState(false) }
+    LaunchedEffect(Unit) { visibleState.targetState = true }
 
     Scaffold(
         topBar = {
@@ -256,196 +276,404 @@ fun ProfileScreen(navController: NavHostController) {
         },
         containerColor = Color(0xFF0F0F0F)
     ) {innerPadding ->
-        Column(
+        val scrollState = rememberScrollState()
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top
+                .imePadding() // ✅ moves content above keyboard
         ) {
-            // Avatar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                contentAlignment = Alignment.Center
+            AnimatedVisibility(
+                visibleState = visibleState,
+                enter = slideInHorizontally(initialOffsetX = { 1000 }, animationSpec = tween(600)) + fadeIn(),
+                exit = slideOutHorizontally(targetOffsetX = { -1000 }, animationSpec = tween(400)) + fadeOut()
             ) {
-                Surface(
-                    modifier = Modifier.size(160.dp),
-                    shape = CircleShape,
-                    color = Color.White,
-                    shadowElevation = 4.dp
+                Column(
+                    modifier = Modifier
+                        .padding(innerPadding)
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Top
                 ) {
-                    if (!profilePhotoUrl.isNullOrEmpty()) {
-                        // Show uploaded profile photo
-                        Image(
-                            painter = rememberAsyncImagePainter(profilePhotoUrl),
-                            contentDescription = "Profile Photo",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        // Show SafePlay logo fallback
-                        Image(
-                            painter = painterResource(id = R.drawable.safeplay_logo),
-                            contentDescription = "Default Profile",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-
-                }
-
-
-                // 🌈 Animated glowing ring overlay during upload
-                if (isUploading) {
+                    // Avatar
                     Box(
                         modifier = Modifier
-                            .size(195.dp)
-                            .align(Alignment.Center)
-                            .zIndex(2f),
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        AnimatedCircularProgressRing(progress = uploadProgress)
-                    }
-                }
-
-
-
-
-
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .offset(x = (-8).dp, y = (-4).dp)
-                ) {
-                    IconButton(
-                        onClick = { photoMenuExpanded = true },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(Color(0xFF1F1F1F), CircleShape)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.White)
-                    }
-
-                    DropdownMenu(
-                        expanded = photoMenuExpanded,
-                        onDismissRequest = { photoMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Change Photo") },
-                            onClick = {
-                                photoMenuExpanded = false
-                                launcher.launch("image/*")
+                        Surface(
+                            modifier = Modifier.size(160.dp),
+                            shape = CircleShape,
+                            color = Color.White,
+                            shadowElevation = 4.dp
+                        ) {
+                            if (!profilePhotoUrl.isNullOrEmpty()) {
+                                // Show uploaded profile photo
+                                Image(
+                                    painter = rememberAsyncImagePainter(profilePhotoUrl),
+                                    contentDescription = "Profile Photo",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                // Show SafePlay logo fallback
+                                Image(
+                                    painter = painterResource(id = R.drawable.safeplay_logo),
+                                    contentDescription = "Default Profile",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
                             }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Remove Photo") },
-                            onClick = {
-                                photoMenuExpanded = false
-                                val currentUid = auth.currentUser?.uid ?: return@DropdownMenuItem
 
-                                val ref = storage.reference.child("profile_photos/$currentUid/profile.jpg")
-                                ref.delete()
-                                    .addOnSuccessListener {
-                                        db.collection("users").document(currentUid)
-                                            .set(mapOf("photoUrl" to null), SetOptions.merge())
-                                        profilePhotoUrl = null
-                                        Toast.makeText(context, "Profile photo removed", Toast.LENGTH_SHORT).show()
-                                    }
-                                    .addOnFailureListener { e ->
-                                        Toast.makeText(context, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                            }
-                        )
-                    }
-                }
-
-            }
+                        }
 
 
-
-
-
-            // small space between avatar and the display name
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // ---------------- Display name (either user name or generated UserXX) ----------------
-            val computedDisplayName: String = remember(name.text, publicId, showDisplayName) {
-                if (showDisplayName && name.text.isNotBlank()) {
-                    name.text
-                } else {
-                    // fallback: last 2 chars of publicId (or uid)
-                    val id = publicId.ifBlank { auth.currentUser?.uid ?: "" }
-                    val suffix = if (id.length >= 2) id.takeLast(2) else id
-                    "User${suffix.uppercase()}"
-                }
-            }
-
-            Text(
-                text = computedDisplayName,
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .padding(top = 6.dp, bottom = 6.dp)
-                    .clickable {
-                        // reuse your existing edit flow: open name editor
-                        nameBuffer = name
-                        editingName = true
-                    }
-            )
-            // -------------------------------------------------------------------------------------
-
-
-
-
-            // small extra spacing before content card
-            Spacer(modifier = Modifier.height(12.dp))
-
-
-
-            // Content card
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                shape = MaterialTheme.shapes.medium,
-                color = Color(0xFF1D1D1D),
-                tonalElevation = 2.dp
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    // UID
-                    ProfileRow(
-                        logoRes = R.raw.uid_logo,
-                        content = {
-                            Column {
-                                Text("UID", color = Color.LightGray, fontSize = 12.sp)
-                                Spacer(Modifier.height(2.dp))
-                                Text(publicId, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        // 🌈 Animated glowing ring overlay during upload
+                        if (isUploading) {
+                            Box(
+                                modifier = Modifier
+                                    .size(195.dp)
+                                    .align(Alignment.Center)
+                                    .zIndex(2f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AnimatedCircularProgressRing(progress = uploadProgress)
                             }
                         }
-                    )
-                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
 
-                    // Name
-                    ProfileRow(
-                        logoRes = R.raw.name_logo,
-                        content = {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Name", color = Color.LightGray, fontSize = 12.sp)
+
+
+
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .offset(x = (-8).dp, y = (-4).dp)
+                        ) {
+                            IconButton(
+                                onClick = { photoMenuExpanded = true },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFF1F1F1F), CircleShape)
+                            ) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit",
+                                    tint = Color.White
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = photoMenuExpanded,
+                                onDismissRequest = { photoMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Change Photo") },
+                                    onClick = {
+                                        photoMenuExpanded = false
+                                        launcher.launch("image/*")
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Remove Photo") },
+                                    onClick = {
+                                        photoMenuExpanded = false
+                                        val currentUid =
+                                            auth.currentUser?.uid ?: return@DropdownMenuItem
+
+                                        val ref =
+                                            storage.reference.child("profile_photos/$currentUid/profile.jpg")
+                                        ref.delete()
+                                            .addOnSuccessListener {
+                                                db.collection("users").document(currentUid)
+                                                    .set(
+                                                        mapOf("photoUrl" to null),
+                                                        SetOptions.merge()
+                                                    )
+                                                profilePhotoUrl = null
+                                                Toast.makeText(
+                                                    context,
+                                                    "Profile photo removed",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            .addOnFailureListener { e ->
+                                                Toast.makeText(
+                                                    context,
+                                                    "Failed: ${e.message}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                    }
+                                )
+                            }
+                        }
+
+                    }
+
+
+                    // small space between avatar and the display name
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // ---------------- Display name (either user name or generated UserXX) ----------------
+                    val computedDisplayName: String =
+                        remember(name.text, publicId, showDisplayName) {
+                            if (showDisplayName && name.text.isNotBlank()) {
+                                name.text
+                            } else {
+                                // fallback: last 2 chars of publicId (or uid)
+                                val id = publicId.ifBlank { auth.currentUser?.uid ?: "" }
+                                val suffix = if (id.length >= 2) id.takeLast(2) else id
+                                "User${suffix.uppercase()}"
+                            }
+                        }
+
+                    Text(
+                        text = computedDisplayName,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .padding(top = 6.dp, bottom = 6.dp)
+                            .clickable {
+                                // reuse your existing edit flow: open name editor
+                                nameBuffer = name
+                                editingName = true
+                            }
+                    )
+                    // -------------------------------------------------------------------------------------
+
+
+                    // small extra spacing before content card
+                    Spacer(modifier = Modifier.height(12.dp))
+
+
+                    // Content card
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        color = Color(0xFF1D1D1D),
+                        tonalElevation = 2.dp
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            // UID
+                            ProfileRow(
+                                logoRes = R.raw.uid_logo,
+                                content = {
+                                    Column {
+                                        Text("UID", color = Color.LightGray, fontSize = 12.sp)
                                         Spacer(Modifier.height(2.dp))
-                                        if (editingName) {
+                                        Text(
+                                            publicId,
+                                            color = Color.White,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            )
+                            Divider(
+                                color = Color(0xFF2A2A2A),
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            // Name
+                            ProfileRow(
+                                logoRes = R.raw.name_logo,
+                                content = {
+                                    Column {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    "Name",
+                                                    color = Color.LightGray,
+                                                    fontSize = 12.sp
+                                                )
+                                                Spacer(Modifier.height(2.dp))
+                                                if (editingName) {
+                                                    OutlinedTextField(
+                                                        value = nameBuffer,
+                                                        onValueChange = { nameBuffer = it },
+                                                        singleLine = true,
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                                                            focusedBorderColor = Color.Gray,
+                                                            unfocusedBorderColor = Color.Transparent,
+                                                            containerColor = Color.Transparent,
+                                                            focusedTextColor = Color.White,
+                                                            unfocusedTextColor = Color.White,
+                                                            cursorColor = Color.White
+                                                        )
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        name.text,
+                                                        color = Color.White,
+                                                        fontSize = 16.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            if (editingName) {
+                                                Button(onClick = {
+                                                    val currentUid =
+                                                        auth.currentUser?.uid ?: return@Button
+                                                    name = nameBuffer
+                                                    db.collection("users").document(currentUid)
+                                                        .set(
+                                                            mapOf("name" to name.text),
+                                                            SetOptions.merge()
+                                                        )
+                                                    editingName = false
+                                                }) { Text("Save") }
+                                            } else {
+                                                IconButton(onClick = {
+                                                    nameBuffer = name
+                                                    editingName = true
+                                                }) {
+                                                    Icon(
+                                                        Icons.Default.Edit,
+                                                        contentDescription = "Edit name",
+                                                        tint = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            Divider(
+                                color = Color(0xFF2A2A2A),
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            // Display name toggle
+                            ProfileRow(
+                                logoRes = R.raw.toggle_logo,
+                                content = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "Display name",
+                                                color = Color.LightGray,
+                                                fontSize = 12.sp
+                                            )
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(
+                                                if (showDisplayName) "Display name is ON" else "Display name is OFF",
+                                                color = Color.White,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                        Switch(checked = showDisplayName, onCheckedChange = {
+                                            showDisplayName = it
+                                            auth.currentUser?.uid?.let { currentUid ->
+                                                db.collection("users").document(currentUid)
+                                                    .set(
+                                                        mapOf("showDisplayName" to it),
+                                                        SetOptions.merge()
+                                                    )
+                                            }
+                                        })
+                                    }
+                                }
+                            )
+                            Divider(
+                                color = Color(0xFF2A2A2A),
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            // Gender
+                            ProfileRow(
+                                logoRes = R.raw.gender_logo,
+                                content = {
+                                    var expanded by remember { mutableStateOf(false) }
+                                    Column {
+                                        Text("Gender", color = Color.LightGray, fontSize = 12.sp)
+                                        Spacer(Modifier.height(4.dp))
+                                        OutlinedTextField(
+                                            value = gender,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            trailingIcon = {
+                                                IconButton(onClick = { expanded = !expanded }) {
+                                                    Icon(
+                                                        painterResource(id = R.drawable.ic_expand),
+                                                        contentDescription = "Expand",
+                                                        tint = Color.White
+                                                    )
+                                                }
+                                            },
+                                            colors = TextFieldDefaults.outlinedTextFieldColors(
+                                                focusedBorderColor = Color.Gray,
+                                                unfocusedBorderColor = Color.Transparent,
+                                                containerColor = Color.Transparent,
+                                                focusedTextColor = Color.White,
+                                                unfocusedTextColor = Color.White,
+                                                cursorColor = Color.White
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        DropdownMenu(
+                                            expanded = expanded,
+                                            onDismissRequest = { expanded = false }) {
+                                            listOf("Male", "Female", "Other").forEach { option ->
+                                                DropdownMenuItem(
+                                                    text = { Text(option) },
+                                                    onClick = {
+                                                        gender = option
+                                                        expanded = false
+                                                        auth.currentUser?.uid?.let { currentUid ->
+                                                            db.collection("users")
+                                                                .document(currentUid)
+                                                                .set(
+                                                                    mapOf("gender" to option),
+                                                                    SetOptions.merge()
+                                                                )
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            Divider(
+                                color = Color(0xFF2A2A2A),
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            // About
+                            ProfileRow(
+                                logoRes = R.raw.about_logo,
+                                content = {
+                                    Column {
+                                        Text("About", color = Color.LightGray, fontSize = 12.sp)
+                                        Spacer(Modifier.height(4.dp))
+                                        if (editingAbout) {
                                             OutlinedTextField(
-                                                value = nameBuffer,
-                                                onValueChange = { nameBuffer = it },
-                                                singleLine = true,
+                                                value = aboutBuffer,
+                                                onValueChange = { aboutBuffer = it },
                                                 modifier = Modifier.fillMaxWidth(),
                                                 colors = TextFieldDefaults.outlinedTextFieldColors(
                                                     focusedBorderColor = Color.Gray,
@@ -456,162 +684,45 @@ fun ProfileScreen(navController: NavHostController) {
                                                     cursorColor = Color.White
                                                 )
                                             )
+                                            Row(
+                                                Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End
+                                            ) {
+                                                Button(onClick = {
+                                                    about = aboutBuffer
+                                                    auth.currentUser?.uid?.let { currentUid ->
+                                                        db.collection("users").document(currentUid)
+                                                            .set(
+                                                                mapOf("about" to about.text),
+                                                                SetOptions.merge()
+                                                            )
+                                                    }
+                                                    editingAbout = false
+                                                }) { Text("Save") }
+                                            }
                                         } else {
-                                            Text(name.text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                        }
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    if (editingName) {
-                                        Button(onClick = {
-                                            val currentUid = auth.currentUser?.uid ?: return@Button
-                                            name = nameBuffer
-                                            db.collection("users").document(currentUid)
-                                                .set(mapOf("name" to name.text), SetOptions.merge())
-                                            editingName = false
-                                        }) { Text("Save") }
-                                    } else {
-                                        IconButton(onClick = {
-                                            nameBuffer = name
-                                            editingName = true
-                                        }) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Edit name", tint = Color.White)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    )
-                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
-
-                    // Display name toggle
-                    ProfileRow(
-                        logoRes = R.raw.toggle_logo,
-                        content = {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Display name", color = Color.LightGray, fontSize = 12.sp)
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        if (showDisplayName) "Display name is ON" else "Display name is OFF",
-                                        color = Color.White,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                                Switch(checked = showDisplayName, onCheckedChange = {
-                                    showDisplayName = it
-                                    auth.currentUser?.uid?.let { currentUid ->
-                                        db.collection("users").document(currentUid)
-                                            .set(mapOf("showDisplayName" to it), SetOptions.merge())
-                                    }
-                                })
-                            }
-                        }
-                    )
-                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
-
-                    // Gender
-                    ProfileRow(
-                        logoRes = R.raw.gender_logo,
-                        content = {
-                            var expanded by remember { mutableStateOf(false) }
-                            Column {
-                                Text("Gender", color = Color.LightGray, fontSize = 12.sp)
-                                Spacer(Modifier.height(4.dp))
-                                OutlinedTextField(
-                                    value = gender,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    trailingIcon = {
-                                        IconButton(onClick = { expanded = !expanded }) {
-                                            Icon(
-                                                painterResource(id = R.drawable.ic_expand),
-                                                contentDescription = "Expand",
-                                                tint = Color.White
+                                            Text(
+                                                about.text,
+                                                color = Color.White,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        aboutBuffer = about
+                                                        editingAbout = true
+                                                    }
                                             )
                                         }
-                                    },
-                                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                                        focusedBorderColor = Color.Gray,
-                                        unfocusedBorderColor = Color.Transparent,
-                                        containerColor = Color.Transparent,
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        cursorColor = Color.White
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                    listOf("Male", "Female", "Other").forEach { option ->
-                                        DropdownMenuItem(
-                                            text = { Text(option) },
-                                            onClick = {
-                                                gender = option
-                                                expanded = false
-                                                auth.currentUser?.uid?.let { currentUid ->
-                                                    db.collection("users").document(currentUid)
-                                                        .set(mapOf("gender" to option), SetOptions.merge())
-                                                }
-                                            }
-                                        )
                                     }
                                 }
-                            }
-                        }
-                    )
-                    Divider(color = Color(0xFF2A2A2A), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
+                            )
 
-                    // About
-                    ProfileRow(
-                        logoRes = R.raw.about_logo,
-                        content = {
-                            Column {
-                                Text("About", color = Color.LightGray, fontSize = 12.sp)
-                                Spacer(Modifier.height(4.dp))
-                                if (editingAbout) {
-                                    OutlinedTextField(
-                                        value = aboutBuffer,
-                                        onValueChange = { aboutBuffer = it },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = TextFieldDefaults.outlinedTextFieldColors(
-                                            focusedBorderColor = Color.Gray,
-                                            unfocusedBorderColor = Color.Transparent,
-                                            containerColor = Color.Transparent,
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            cursorColor = Color.White
-                                        )
-                                    )
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                        Button(onClick = {
-                                            about = aboutBuffer
-                                            auth.currentUser?.uid?.let { currentUid ->
-                                                db.collection("users").document(currentUid)
-                                                    .set(mapOf("about" to about.text), SetOptions.merge())
-                                            }
-                                            editingAbout = false
-                                        }) { Text("Save") }
-                                    }
-                                } else {
-                                    Text(
-                                        about.text,
-                                        color = Color.White,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                aboutBuffer = about
-                                                editingAbout = true
-                                            }
-                                    )
-                                }
-                            }
+                            Spacer(modifier = Modifier.height(12.dp))
                         }
-                    )
+                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

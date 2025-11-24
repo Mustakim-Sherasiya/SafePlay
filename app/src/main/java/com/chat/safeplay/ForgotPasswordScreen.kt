@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -18,17 +19,35 @@ fun ForgotPasswordScreen(
     onResetClick: (String) -> Unit,
     onBackClick: () -> Unit
 ) {
-    var email by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var email by rememberSaveable { mutableStateOf("") }
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Cooldown duration in milliseconds
+// Cooldown duration in milliseconds
     val cooldownMillis = 60_000L
     val now = System.currentTimeMillis()
     val remainingTimeMillis = (lastSentTimeMillis + cooldownMillis - now).coerceAtLeast(0)
 
-    // Track countdown seconds
-    var countdownSeconds by remember { mutableStateOf((remainingTimeMillis / 1000).toInt()) }
+// Track countdown seconds
+    var countdownSeconds by rememberSaveable { mutableStateOf((remainingTimeMillis / 1000).toInt()) }
+
+
+
+
+
+
+
+//    var email by remember { mutableStateOf("") }
+//    var errorMessage by remember { mutableStateOf<String?>(null) }
+//    val coroutineScope = rememberCoroutineScope()
+//
+//    // Cooldown duration in milliseconds
+//    val cooldownMillis = 60_000L
+//    val now = System.currentTimeMillis()
+//    val remainingTimeMillis = (lastSentTimeMillis + cooldownMillis - now).coerceAtLeast(0)
+//
+//    // Track countdown seconds
+//    var countdownSeconds by remember { mutableStateOf((remainingTimeMillis / 1000).toInt()) }
 
     // Countdown timer effect
     LaunchedEffect(key1 = remainingTimeMillis) {

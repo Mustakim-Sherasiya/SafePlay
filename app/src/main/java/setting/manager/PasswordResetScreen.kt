@@ -272,7 +272,7 @@ fun PasswordResetScreen(
                     }
 
                     ClickableText(
-                        text = AnnotatedString("safeplay.users.info@gmail.com"),
+                        text = AnnotatedString("safeplay@spysolution.in"),
                         style = TextStyle(
                             color = Color(0xFF3B82F6),
                             fontSize = 14.sp,
@@ -282,7 +282,7 @@ fun PasswordResetScreen(
                             try {
                                 val intent = Intent(Intent.ACTION_SEND).apply {
                                     type = "message/rfc822"
-                                    putExtra(Intent.EXTRA_EMAIL, arrayOf("safeplay.users.info@gmail.com"))
+                                    putExtra(Intent.EXTRA_EMAIL, arrayOf("safeplay@spysolution.in"))
                                     putExtra(Intent.EXTRA_SUBJECT, "Help with Password Reset - SafePlay App")
                                     putExtra(
                                         Intent.EXTRA_TEXT,

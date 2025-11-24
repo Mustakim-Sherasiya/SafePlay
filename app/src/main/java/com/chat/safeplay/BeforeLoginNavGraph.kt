@@ -138,11 +138,40 @@ fun BeforeLoginNavGraph(
                                                 }
                                             } else {
                                                 // ✅ Normal user must verify email
+                                                //Auto login when logen in if not work then uncomment below line and delete this block
+
                                                 if (user.isEmailVerified) {
-                                                    navController.navigate("enterPin") {
-                                                        popUpTo("login") { inclusive = true }
-                                                    }
-                                                } else {
+                                                    LocalStorage.saveLogin(context.applicationContext, input, password)
+                                                    // ✅ Force Firestore reload before navigating
+                                                    val firestore = FirebaseFirestore.getInstance()
+                                                    firestore.collection("users").document(user.uid).get()
+                                                        .addOnSuccessListener { document ->
+                                                            if (document.exists() && document.getString("pin") != null) {
+                                                                // ✅ Pin already exists → Go to enterPin
+                                                                navController.navigate("enterPin") {
+                                                                    popUpTo("login") { inclusive = true }
+                                                                }
+                                                            } else {
+                                                                // 🆕 No pin yet → Go to createPin
+                                                                navController.navigate("createPin") {
+                                                                    popUpTo("login") { inclusive = true }
+                                                                }
+                                                            }
+                                                        }
+                                                        .addOnFailureListener {
+                                                            Toast.makeText(context, "Failed to fetch PIN info.", Toast.LENGTH_SHORT).show()
+                                                            navController.navigate("enterPin") // fallback safe path
+                                                        }
+                                                }
+
+
+//                                                if (user.isEmailVerified) {
+//                                                    navController.navigate("enterPin") {
+//                                                        popUpTo("login") { inclusive = true }
+//                                                    }
+//                                                }
+
+                                                  else {
                                                     val now = System.currentTimeMillis()
                                                     if (now - lastVerificationEmailSentTime.value > 60_000) {
                                                         user.sendEmailVerification()
@@ -157,7 +186,7 @@ fun BeforeLoginNavGraph(
                                                                 } else {
                                                                     Toast.makeText(
                                                                         context,
-                                                                        "Failed to send verification email.",
+                                                                        "Please verify your email from your main through send Link, See SPAM FOLDER.",
                                                                         Toast.LENGTH_SHORT
                                                                     ).show()
                                                                 }
@@ -583,18 +612,18 @@ fun BottomNavigationBar(navController: NavHostController) {
         )
     }
 }
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
+
+
+
+
+
+
+
+
+
+
+
+
 //
 //
 //package com.chat.safeplay

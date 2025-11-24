@@ -1,5 +1,6 @@
 package com.chat.safeplay
 
+import android.os.Build
 import android.widget.Toast
 import androidx.annotation.RawRes
 import androidx.compose.foundation.Image
@@ -67,7 +68,28 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.QuerySnapshot
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import com.chat.safeplay.setting.manager.SettingRoutes
+import androidx.compose.animation.core.*
+import androidx.compose.animation.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import com.chat.safeplay.LocalStorage
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 
 // replace the existing data class User { ... } with this
@@ -100,15 +122,44 @@ private data class DashboardRow(
 
 
 
+@RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserDashboardScreen(
     navController: NavHostController,
     currentUserUid: String
 ) {
+
+
+    var isLoggingOut by remember { mutableStateOf(false) }
+
+
     val context = LocalContext.current
+    val appContext = context.applicationContext
+    val coroutineScope = rememberCoroutineScope()
+
 
     // Existing search state
+
+//    // ✅ Updated states for search
+//    var foundUser by rememberSaveable { mutableStateOf<User?>(null) }
+//    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+//    var isLoading by rememberSaveable { mutableStateOf(false) }
+//    var searchInput by rememberSaveable { mutableStateOf("") }
+//    var searchResult by rememberSaveable { mutableStateOf<String?>(null) }
+//
+//// ✅ Firebase references (not saved)
+//    val db = FirebaseFirestore.getInstance()
+//    val auth = FirebaseAuth.getInstance()
+//    var photoUrl by rememberSaveable { mutableStateOf<String?>(null) }
+//
+//// ✅ Conversations
+//    var conversations by rememberSaveable { mutableStateOf<List<ConversationOverview>>(emptyList()) }
+//    var convosLoading by rememberSaveable { mutableStateOf(true) }
+//    var convosError by rememberSaveable { mutableStateOf<String?>(null) }
+//
+
+
 
     var foundUser by remember { mutableStateOf<User?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -189,44 +240,80 @@ fun UserDashboardScreen(
 // Also surface errors via Toast so you can see why things fail (index/permission/etc).
     // Robust DisposableEffect: attach UID listener immediately, load publicId and attach publicId fallback if needed.
 // returns a single onDispose at the end so it compiles correctly.
+
+
     DisposableEffect(auth.currentUser?.uid) {
         val uid = auth.currentUser?.uid
         if (uid == null) {
             convosLoading = false
             convosError = "Not signed in"
-            onDispose { /* nothing */ }
+            onDispose { }
         } else {
             convosLoading = true
             convosError = null
 
-            val listener = db.collection("chats")
+            // 🌐 Track active user listeners
+            val userListeners = mutableMapOf<String, ListenerRegistration>()
+
+            val chatListener = db.collection("chats")
                 .whereArrayContains("participants", uid)
                 .orderBy("lastUpdated", Query.Direction.DESCENDING)
                 .limit(25)
                 .addSnapshotListener { snap, err ->
                     convosLoading = false
+
                     if (err != null) {
                         convosError = "Failed to load conversations: ${err.message ?: "unknown"}"
                         conversations = emptyList()
                         return@addSnapshotListener
                     }
+
                     if (snap != null && !snap.isEmpty) {
-                        val list = snap.documents.map { doc ->
+                        val tempConvos = mutableListOf<ConversationOverview>()
+
+                        snap.documents.forEach { doc ->
                             val rawLast = doc.getString("lastMessage")?.trim() ?: ""
                             val hasMsg = rawLast.isNotBlank()
-                            val title = doc.getString("title") ?: doc.getString("displayName") ?: doc.id
-                            val photo = doc.getString("photoUrl")?.trim()?.trim('"')?.ifBlank { null }
+                            val participants = doc.get("participants") as? List<*>
+                            val otherId = participants?.firstOrNull { it != uid } as? String ?: return@forEach
+
+                            // 🔥 Live listener for each participant’s profile
+                            if (!userListeners.containsKey(otherId)) {
+                                val reg = db.collection("users").document(otherId)
+                                    .addSnapshotListener { userSnap, _ ->
+                                        if (userSnap != null && userSnap.exists()) {
+                                            val show = userSnap.getBoolean("showDisplayName") ?: false
+                                            val name = userSnap.getString("name")
+                                            val publicId = userSnap.getString("publicId") ?: otherId
+                                            val photo = userSnap.getString("photoUrl")
+                                            val suffix = if (publicId.length >= 2) publicId.takeLast(2) else publicId
+                                            val displayName = if (show && !name.isNullOrBlank()) name else "User${suffix.uppercase()}"
+
+                                            val updatedList = conversations.map { c ->
+                                                if (c.convoId.contains(otherId)) {
+                                                    c.copy(title = displayName, photoUrl = photo)
+                                                } else c
+                                            }
+                                            conversations = updatedList
+                                        }
+                                    }
+                                userListeners[otherId] = reg
+                            }
+
                             val lastUpdatedTs = doc.getTimestamp("lastUpdated")?.toDate()?.time
-                            ConversationOverview(
-                                convoId = doc.id,
-                                title = title,
-                                lastMessage = if (hasMsg) rawLast else "No messages yet",
-                                photoUrl = photo,
-                                hasMessages = hasMsg,
-                                lastUpdatedMillis = lastUpdatedTs
+                            tempConvos.add(
+                                ConversationOverview(
+                                    convoId = doc.id,
+                                    title = "Loading...", // will update live
+                                    lastMessage = if (hasMsg) rawLast else "No messages yet",
+                                    photoUrl = null,
+                                    hasMessages = hasMsg,
+                                    lastUpdatedMillis = lastUpdatedTs
+                                )
                             )
                         }
-                        conversations = list
+
+                        conversations = tempConvos.sortedByDescending { it.lastUpdatedMillis }
                         convosError = null
                     } else {
                         conversations = emptyList()
@@ -234,10 +321,87 @@ fun UserDashboardScreen(
                 }
 
             onDispose {
-                listener.remove()
+                chatListener.remove()
+                userListeners.values.forEach { it.remove() }
             }
         }
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//    DisposableEffect(auth.currentUser?.uid) {
+//        val uid = auth.currentUser?.uid
+//        if (uid == null) {
+//            convosLoading = false
+//            convosError = "Not signed in"
+//            onDispose { /* nothing */ }
+//        } else {
+//            convosLoading = true
+//            convosError = null
+//
+//            val listener = db.collection("chats")
+//                .whereArrayContains("participants", uid)
+//                .orderBy("lastUpdated", Query.Direction.DESCENDING)
+//                .limit(25)
+//                .addSnapshotListener { snap, err ->
+//                    convosLoading = false
+//                    if (err != null) {
+//                        convosError = "Failed to load conversations: ${err.message ?: "unknown"}"
+//                        conversations = emptyList()
+//                        return@addSnapshotListener
+//                    }
+//                    if (snap != null && !snap.isEmpty) {
+//                        val list = snap.documents.map { doc ->
+//                            val rawLast = doc.getString("lastMessage")?.trim() ?: ""
+//                            val hasMsg = rawLast.isNotBlank()
+//
+//
+//                            val show = doc.getBoolean("showDisplayName") ?: false
+//                            val name = doc.getString("name")
+//                            val publicId = doc.getString("publicId") ?: doc.id
+//
+//                            val suffix = if (publicId.length >= 2) publicId.takeLast(2) else publicId
+//                            val displayName = if (show && !name.isNullOrBlank()) name else "User${suffix.uppercase()}"
+//                            val title = displayName
+//
+//
+//
+//
+//                            val photo = doc.getString("photoUrl")?.takeIf { !it.isNullOrBlank() }
+//
+//                            val lastUpdatedTs = doc.getTimestamp("lastUpdated")?.toDate()?.time
+//                            ConversationOverview(
+//                                convoId = doc.id,
+//                                title = title,
+//                                lastMessage = if (hasMsg) rawLast else "No messages yet",
+//                                photoUrl = photo,
+//                                hasMessages = hasMsg,
+//                                lastUpdatedMillis = lastUpdatedTs
+//                            )
+//                        }
+//                        conversations = list
+//                        convosError = null
+//                    } else {
+//                        conversations = emptyList()
+//                    }
+//                }
+//
+//            onDispose {
+//                listener.remove()
+//            }
+//        }
+//    }
 
 
 
@@ -466,13 +630,67 @@ fun UserDashboardScreen(
                                     )
                                     Divider()
                                     DropdownMenuItem(
-                                        text = { Text("Logout") },
+                                        text = { Text(if (isLoggingOut) "Logging out..." else "Logout") },
+                                        enabled = !isLoggingOut,
                                         onClick = {
+                                            if (isLoggingOut) return@DropdownMenuItem
+                                            isLoggingOut = true
                                             profileMenuExpanded = false
-                                            FirebaseAuth.getInstance().signOut()
-                                            Toast.makeText(context, "Logged out", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Logout clicked", Toast.LENGTH_SHORT).show()
+
+                                            try {
+                                                FirebaseAuth.getInstance().signOut()
+                                                Toast.makeText(context, "Firebase signOut done", Toast.LENGTH_SHORT).show()
+
+                                                LocalStorage.clear(appContext)
+                                                val loggedIn = LocalStorage.isLoggedIn(appContext)
+                                                Toast.makeText(context, "LocalStorage cleared: $loggedIn", Toast.LENGTH_SHORT).show()
+
+                                                Log.d("SafePlayDebug", "Logout → Firebase signed out, LocalStorage cleared: $loggedIn")
+                                            } catch (e: Exception) {
+                                                Log.e("SafePlayDebug", "Logout error", e)
+                                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                            }
+
+                                            coroutineScope.launch {
+                                                delay(600)
+                                                try {
+                                                    navController.navigate("home") {
+                                                        popUpTo(0) { inclusive = true }
+                                                        launchSingleTop = true
+                                                    }
+                                                    Toast.makeText(context, "Navigated to Home", Toast.LENGTH_SHORT).show()
+                                                } catch (e: Exception) {
+                                                    Log.e("SafePlayDebug", "Nav error", e)
+                                                }
+                                                isLoggingOut = false
+                                            }
                                         }
+
                                     )
+//                                    )DropdownMenuItem(
+//                                        text = { Text(if (isLoggingOut) "Logging out..." else "Logout") },
+//                                        enabled = !isLoggingOut,
+//                                        onClick = {
+//                                            if (isLoggingOut) return@DropdownMenuItem
+//                                            isLoggingOut = true
+//                                            profileMenuExpanded = false
+//
+//                                            FirebaseAuth.getInstance().signOut()
+//                                            LocalStorage.clear(appContext)
+//                                            Toast.makeText(context, "Logged out", Toast.LENGTH_SHORT).show()
+//
+//                                            coroutineScope.launch {
+//                                                delay(300)
+//                                                navController.navigate("home") {
+//                                                    popUpTo(0) { inclusive = true }
+//                                                    launchSingleTop = true
+//                                                }
+//                                                isLoggingOut = false
+//                                            }
+//                                        }
+//                                    )
+
                                 }
                             }
 
@@ -735,61 +953,352 @@ fun UserDashboardScreen(
             if (conversations.isNotEmpty()) {
                 items(conversations.size) { idx ->
                     val conv = conversations[idx]
-                    Card(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .fillMaxWidth()
-                            .clickable {
-                                // compute the other participant id from the convoId (works for uid_uid  or publicId_publicId)
-                                val otherId = otherIdFromConvo(conv.convoId, appUid)
-                                if (!conv.hasMessages) {
-                                    Toast.makeText(context, "No messages yet — start the conversation", Toast.LENGTH_SHORT).show()
-                                }
-                                // navigate to chat screen for the other participant
-                                navController.navigate(ChatRoutes.chatWith(otherId))
-                            }
-                        ,
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(animationSpec = tween(400)),
+                        exit = fadeOut(animationSpec = tween(300))
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            androidx.compose.foundation.Image(
-                                painter = if (!conv.photoUrl.isNullOrEmpty())
-                                    rememberAsyncImagePainter(conv.photoUrl)
-                                else
-                                    painterResource(id = R.drawable.safeplay_logo),
-                                contentDescription = "Convo Photo",
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
+                        // --- Previous state to detect changes ---
+                        var prevTitle by remember { mutableStateOf(conv.title) }
+                        var prevPhoto by remember { mutableStateOf(conv.photoUrl) }
+                        var glowActive by remember { mutableStateOf(false) }
 
-                            Spacer(Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(conv.title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    conv.lastMessage,
-                                    fontSize = 13.sp,
-                                    color = if (conv.hasMessages) Color.Gray else Color(0xFF9E9E9E),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                        // --- Detect change (live Firestore updates trigger this) ---
+                        LaunchedEffect(conv.title, conv.photoUrl) {
+                            if (conv.title != prevTitle || conv.photoUrl != prevPhoto) {
+                                prevTitle = conv.title
+                                prevPhoto = conv.photoUrl
+                                glowActive = true
+                                kotlinx.coroutines.delay(1800)
+                                glowActive = false
                             }
+                        }
 
-                            conv.lastUpdatedMillis?.let { millis ->
-                                val timeText = android.text.format.DateFormat.format(
-                                    "dd MMM, HH:mm",
-                                    java.util.Date(millis)
-                                ).toString()
-                                Text(timeText, fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                        // --- Animate core glow intensity ---
+                        val glowAlpha by animateFloatAsState(
+                            targetValue = if (glowActive) 1f else 0f,
+                            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+                            label = "SafePlayGlowAlpha"
+                        )
+
+                        // --- Infinite transitions for pulse & rotation ---
+                        val infinite = rememberInfiniteTransition(label = "GlowInfinite")
+                        val pulse by infinite.animateFloat(
+                            initialValue = 0.5f,
+                            targetValue = 1.3f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1700, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "GlowPulse"
+                        )
+                        val angle by infinite.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(6000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "RimRotation"
+                        )
+
+                        // --- Theme adaptive colors ---
+                        val isDark = isSystemInDarkTheme()
+                        val core = if (isDark) Color(0xFF00FFFF) else Color(0xFF00E5FF)
+                        val accent = if (isDark) Color(0xFF4FC3F7) else Color(0xFF80EFFF)
+                        val deep = if (isDark) Color(0xFF0077FF) else Color(0xFFAA33FF)
+
+                        // --- Halo + Rim brushes ---
+                        val halo = Brush.radialGradient(
+                            colors = listOf(
+                                core.copy(alpha = 0.6f * glowAlpha),
+                                accent.copy(alpha = 0.25f * glowAlpha),
+                                Color.Transparent
+                            ),
+                            center = Offset(
+                                x = 300f * kotlin.math.cos(Math.toRadians(angle.toDouble())).toFloat(),
+                                y = 300f * kotlin.math.sin(Math.toRadians(angle.toDouble())).toFloat()
+                            ),
+                            radius = 900f
+                        )
+
+                        val rim = Brush.sweepGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                core.copy(alpha = 0.4f * glowAlpha),
+                                accent.copy(alpha = 0.3f * glowAlpha),
+                                Color.Transparent
+                            )
+                        )
+
+                        val reflectiveOverlay = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.15f * glowAlpha),
+                                Color.Transparent
+                            )
+                        )
+
+                        // --- Halo expansion animation ---
+                        val haloExpand by animateDpAsState(
+                            targetValue = if (glowActive) 30.dp else 0.dp,
+                            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+                            label = "HaloExpand"
+                        )
+
+                        // --- Subtle vibration on glow start ---
+                        val context = LocalContext.current
+                        LaunchedEffect(glowActive) {
+                            if (glowActive) {
+                                try {
+                                    val vibrator = context.getSystemService(android.os.Vibrator::class.java)
+                                    vibrator?.vibrate(android.os.VibrationEffect.createOneShot(25, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                } catch (_: Exception) { }
+                            }
+                        }
+
+                        // --- Outer Box for halo & rim ---
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .shadow(
+                                    if (glowAlpha > 0f) 24.dp else 0.dp,
+                                    shape = RoundedCornerShape(16.dp),
+                                    ambientColor = core.copy(alpha = 0.9f * glowAlpha),
+                                    spotColor = accent.copy(alpha = 0.9f * glowAlpha)
+                                )
+                                .background(
+                                    brush = if (glowAlpha > 0f) halo else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent)),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .border(
+                                    width = if (glowAlpha > 0f) 1.6.dp else 0.dp,
+                                    brush = rim,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .background(
+                                    brush = if (glowAlpha > 0f) reflectiveOverlay else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent)),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .animateContentSize()
+                        ) {
+                            // --- Actual Card content ---
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val otherId = otherIdFromConvo(conv.convoId, appUid)
+                                        if (!conv.hasMessages) {
+                                            Toast.makeText(context, "No messages yet — start the conversation", Toast.LENGTH_SHORT).show()
+                                        }
+                                        navController.navigate(ChatRoutes.chatWith(otherId))
+                                    },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(12.dp)
+                                        .animateContentSize(animationSpec = tween(300)),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Image(
+                                        painter = rememberAsyncImagePainter(
+                                            model = conv.photoUrl ?: R.drawable.safeplay_logo
+                                        ),
+                                        contentDescription = "User Photo",
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+
+                                    Spacer(Modifier.width(12.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            conv.title,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color.White,
+                                            modifier = Modifier.animateContentSize()
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            conv.lastMessage,
+                                            fontSize = 13.sp,
+                                            color = if (conv.hasMessages) Color.Gray else Color(0xFF9E9E9E),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.animateContentSize()
+                                        )
+                                    }
+
+                                    conv.lastUpdatedMillis?.let { millis ->
+                                        val timeText = android.text.format.DateFormat.format(
+                                            "dd MMM, HH:mm",
+                                            java.util.Date(millis)
+                                        ).toString()
+                                        Text(
+                                            timeText,
+                                            fontSize = 12.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(start = 8.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+
+
+
+                    //=============---------- GOOD GLOW BUT NOT CIRCULING ----===============//
+
+
+//                    AnimatedVisibility(
+//                        visible = true,
+//                        enter = fadeIn(animationSpec = tween(400)),
+//                        exit = fadeOut(animationSpec = tween(300))
+//                    ) {
+//                        // remember previous state to detect changes
+//                        var previousTitle by remember { mutableStateOf(conv.title) }
+//                        var previousPhoto by remember { mutableStateOf(conv.photoUrl) }
+//
+//                        // state for SafePlay glow
+//                        var glowActive by remember { mutableStateOf(false) }
+//
+//                        // 🔹 detect change in user name or photo → trigger glow
+//                        LaunchedEffect(conv.title, conv.photoUrl) {
+//                            if (conv.title != previousTitle || conv.photoUrl != previousPhoto) {
+//                                previousTitle = conv.title
+//                                previousPhoto = conv.photoUrl
+//                                glowActive = true
+//                                kotlinx.coroutines.delay(1800) // glow duration (ms)
+//                                glowActive = false
+//                            }
+//                        }
+//
+//                        // glow animation alpha
+//                        val glowAlpha by animateFloatAsState(
+//                            targetValue = if (glowActive) 1f else 0f,
+//                            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+//                            label = "SafePlayGlow"
+//                        )
+//
+//                        // 🔵 SafePlay glow colors
+//                        val isDark = isSystemInDarkTheme()
+//                        val cyanCore = if (isDark) Color(0xFF00FFFF) else Color(0xFF00E5FF)
+//                        val cyanSoft = if (isDark) Color(0xFF66FFFF) else Color(0xFF80EFFF)
+//
+//                        // 🌈 Halo + rim gradients
+//                        val radialGlow = Brush.radialGradient(
+//                            colors = listOf(
+//                                cyanCore.copy(alpha = 0.55f * glowAlpha),
+//                                cyanSoft.copy(alpha = 0.25f * glowAlpha),
+//                                Color.Transparent
+//                            )
+//                        )
+//                        val rimLight = Brush.sweepGradient(
+//                            colors = listOf(
+//                                Color.Transparent,
+//                                cyanCore.copy(alpha = 0.35f * glowAlpha),
+//                                cyanSoft.copy(alpha = 0.2f * glowAlpha),
+//                                Color.Transparent
+//                            )
+//                        )
+//
+//                        Box(
+//                            modifier = Modifier
+//                                .padding(horizontal = 12.dp, vertical = 6.dp)
+//                                .shadow(
+//                                    if (glowAlpha > 0f) 20.dp else 0.dp,
+//                                    shape = RoundedCornerShape(16.dp),
+//                                    ambientColor = cyanCore.copy(alpha = 0.8f * glowAlpha),
+//                                    spotColor = cyanSoft.copy(alpha = 0.8f * glowAlpha)
+//                                )
+//                                .background(
+//                                    brush = if (glowAlpha > 0f) radialGlow else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent)),
+//                                    shape = RoundedCornerShape(16.dp)
+//                                )
+//                                .border(
+//                                    width = if (glowAlpha > 0f) 1.4.dp else 0.dp,
+//                                    brush = rimLight,
+//                                    shape = RoundedCornerShape(16.dp)
+//                                )
+//                                .animateContentSize()
+//                        ) {
+//                            Card(
+//                                modifier = Modifier
+//                                    .fillMaxWidth()
+//                                    .clickable {
+//                                        val otherId = otherIdFromConvo(conv.convoId, appUid)
+//                                        if (!conv.hasMessages) {
+//                                            Toast.makeText(context, "No messages yet — start the conversation", Toast.LENGTH_SHORT).show()
+//                                        }
+//                                        navController.navigate(ChatRoutes.chatWith(otherId))
+//                                    },
+//                                shape = RoundedCornerShape(16.dp),
+//                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+//                                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+//                            ) {
+//                                Row(
+//                                    modifier = Modifier
+//                                        .padding(12.dp)
+//                                        .animateContentSize(animationSpec = tween(300)),
+//                                    verticalAlignment = Alignment.CenterVertically
+//                                ) {
+//                                    Image(
+//                                        painter = rememberAsyncImagePainter(
+//                                            model = conv.photoUrl ?: R.drawable.safeplay_logo
+//                                        ),
+//                                        contentDescription = "User Photo",
+//                                        modifier = Modifier
+//                                            .size(48.dp)
+//                                            .clip(CircleShape),
+//                                        contentScale = ContentScale.Crop
+//                                    )
+//
+//                                    Spacer(Modifier.width(12.dp))
+//
+//                                    Column(modifier = Modifier.weight(1f)) {
+//                                        Text(
+//                                            conv.title,
+//                                            fontSize = 16.sp,
+//                                            fontWeight = FontWeight.Medium,
+//                                            color = Color.White,
+//                                            modifier = Modifier.animateContentSize()
+//                                        )
+//                                        Spacer(Modifier.height(4.dp))
+//                                        Text(
+//                                            conv.lastMessage,
+//                                            fontSize = 13.sp,
+//                                            color = if (conv.hasMessages) Color.Gray else Color(0xFF9E9E9E),
+//                                            maxLines = 1,
+//                                            overflow = TextOverflow.Ellipsis,
+//                                            modifier = Modifier.animateContentSize()
+//                                        )
+//                                    }
+//
+//                                    conv.lastUpdatedMillis?.let { millis ->
+//                                        val timeText = android.text.format.DateFormat.format(
+//                                            "dd MMM, HH:mm",
+//                                            java.util.Date(millis)
+//                                        ).toString()
+//                                        Text(
+//                                            timeText,
+//                                            fontSize = 12.sp,
+//                                            color = Color.Gray,
+//                                            modifier = Modifier.padding(start = 8.dp)
+//                                        )
+//                                    }
+//                                }
+//                            }
+//                        }
+//                    }
+
+
+
                 }
             } else {
                 // fallback to static alerts when there are no conversations

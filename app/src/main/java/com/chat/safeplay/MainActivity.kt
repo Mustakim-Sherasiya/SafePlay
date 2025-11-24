@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.chat.safeplay.ui.theme.SafePlayTheme
@@ -18,7 +19,7 @@ import com.chat.safeplay.ui.theme.LaunchVideoOverlay
 
 
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private lateinit var auth: FirebaseAuth
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
                             currentRoute != "profile" &&
                             currentRoute != "settings"&&
                             currentRoute != "starredMessages" &&
+                            currentRoute != "ForgotPasswordScreen" &&
                             currentRoute?.startsWith("chat/") == false
                         ) {
                             BottomNavigationBar(navController)

@@ -20,11 +20,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.compose.ui.graphics.Color
+import com.chat.safeplay.LocalStorage
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+
+
+
 @Composable
 fun HomeScreen(navController: NavHostController) {
     val isDark = isSystemInDarkTheme() // detect current system theme
     var devMessageVisible by remember { mutableStateOf(true) }
     val context = LocalContext.current
+    val appContext = context.applicationContext
+
 
     // Background and text color adapt automatically
     val backgroundColor = if (isDark) Color.Black else Color.White
@@ -43,7 +51,11 @@ fun HomeScreen(navController: NavHostController) {
                         } catch (_: Exception) {}
 
                         val duration = System.currentTimeMillis() - pressTime
-                        if (duration >= 3000) {
+                        if (duration >= 2000) {
+                            if (!LocalStorage.isLoggedIn(appContext)) {
+                                FirebaseAuth.getInstance().signOut()
+                            }
+
                             // Vibrate after 3 seconds
                             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                 val vibratorManager =
@@ -66,8 +78,64 @@ fun HomeScreen(navController: NavHostController) {
                                 vibrator.vibrate(80)
                             }
 
-                            devMessageVisible = false
-                            navController.navigate("login")
+                            devMessageVisible = false  // ✅ keep this
+
+                            val auth = FirebaseAuth.getInstance()
+                            val firestore = FirebaseFirestore.getInstance()
+
+                            if (LocalStorage.isLoggedIn(appContext)) {
+                                val email = LocalStorage.getEmail(appContext)
+                                val password = LocalStorage.getPassword(appContext)
+
+
+                                if (auth.currentUser == null && email != null && password != null) {
+                                    // 🔁 Re-login silently using saved credentials
+                                    auth.signInWithEmailAndPassword(email, password)
+                                        .addOnSuccessListener {
+                                            val user = auth.currentUser
+                                            if (user != null) {
+                                                firestore.collection("users").document(user.uid).get()
+                                                    .addOnSuccessListener { doc ->
+                                                        val hasPin = doc.getString("pin") != null
+                                                        if (hasPin) {
+                                                            navController.navigate("enterPin")
+                                                        } else {
+                                                            navController.navigate("createPin")
+                                                        }
+                                                    }
+                                                    .addOnFailureListener {
+                                                        navController.navigate("enterPin") // fallback
+                                                    }
+                                            } else {
+                                                navController.navigate("login")
+                                            }
+                                        }
+                                        .addOnFailureListener {
+                                            navController.navigate("login")
+                                        }
+                                } else {
+                                    val user = auth.currentUser
+                                    if (user != null) {
+                                        firestore.collection("users").document(user.uid).get()
+                                            .addOnSuccessListener { doc ->
+                                                val hasPin = doc.getString("pin") != null
+                                                if (hasPin) {
+                                                    navController.navigate("enterPin")
+                                                } else {
+                                                    navController.navigate("createPin")
+                                                }
+                                            }
+                                            .addOnFailureListener {
+                                                navController.navigate("enterPin")
+                                            }
+                                    } else {
+                                        navController.navigate("login")
+                                    }
+                                }
+                            } else {
+                                navController.navigate("login")
+                            }
+
                         }
                     }
                 )
@@ -103,7 +171,6 @@ fun HomeScreen(navController: NavHostController) {
 
 
 
-
 //package com.chat.safeplay
 //
 //import android.content.Context
@@ -113,6 +180,7 @@ fun HomeScreen(navController: NavHostController) {
 //import android.os.VibratorManager
 //import androidx.compose.foundation.background
 //import androidx.compose.foundation.gestures.detectTapGestures
+//import androidx.compose.foundation.isSystemInDarkTheme
 //import androidx.compose.foundation.layout.*
 //import androidx.compose.material3.*
 //import androidx.compose.runtime.*
@@ -127,26 +195,29 @@ fun HomeScreen(navController: NavHostController) {
 //import androidx.compose.ui.graphics.Color
 //@Composable
 //fun HomeScreen(navController: NavHostController) {
+//    val isDark = isSystemInDarkTheme() // detect current system theme
 //    var devMessageVisible by remember { mutableStateOf(true) }
 //    val context = LocalContext.current
+//
+//    // Background and text color adapt automatically
+//    val backgroundColor = if (isDark) Color.Black else Color.White
+//    val textColor = if (isDark) Color.White else Color.Black
 //
 //    Box(
 //        modifier = Modifier
 //            .fillMaxSize()
-//            .background(Color.Black)
+//            .background(backgroundColor)
 //            .pointerInput(Unit) {
 //                detectTapGestures(
 //                    onPress = {
 //                        val pressTime = System.currentTimeMillis()
 //                        try {
-//                            // Wait for release or cancel
 //                            awaitRelease()
 //                        } catch (_: Exception) {}
 //
 //                        val duration = System.currentTimeMillis() - pressTime
-//
 //                        if (duration >= 3000) {
-//                            // Vibrate when 3 seconds are over
+//                            // Vibrate after 3 seconds
 //                            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 //                                val vibratorManager =
 //                                    context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -159,7 +230,7 @@ fun HomeScreen(navController: NavHostController) {
 //                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 //                                vibrator.vibrate(
 //                                    VibrationEffect.createOneShot(
-//                                        80, // vibration duration in ms
+//                                        80,
 //                                        VibrationEffect.DEFAULT_AMPLITUDE
 //                                    )
 //                                )
@@ -168,7 +239,6 @@ fun HomeScreen(navController: NavHostController) {
 //                                vibrator.vibrate(80)
 //                            }
 //
-//                            // Navigate after vibration
 //                            devMessageVisible = false
 //                            navController.navigate("login")
 //                        }
@@ -181,21 +251,23 @@ fun HomeScreen(navController: NavHostController) {
 //            if (devMessageVisible) {
 //                Text(
 //                    text = "🔧 App is still in development...",
-//                    color = Color.White,
+//                    color = textColor,
 //                    fontSize = 20.sp
 //                )
 //                Spacer(modifier = Modifier.height(24.dp))
 //            }
-//            Button(onClick = { navController.navigate("gameSelection") }) {
+//            Button(
+//                onClick = { navController.navigate("gameSelection") },
+//                colors = ButtonDefaults.buttonColors(
+//                    containerColor = if (isDark) Color.DarkGray else Color.LightGray,
+//                    contentColor = textColor
+//                )
+//            ) {
 //                Text("🎮 Play a Game While You Wait")
 //            }
 //        }
 //    }
 //}
-//
-//
-//
-//
 //
 //
 //

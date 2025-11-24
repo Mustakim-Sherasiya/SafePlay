@@ -49,7 +49,7 @@ fun SettingsScreen(
     val ctx = LocalContext.current
     val items = listOf(
         SettingItemData("Password manager", rawResourceUri(ctx, R.raw.pass_change)),
-        SettingItemData("PIN change", rawResourceUri(ctx, R.raw.pin_change)),
+        SettingItemData("PIN change and Biometric", rawResourceUri(ctx, R.raw.pin_change)),
         SettingItemData("Change chat background", rawResourceUri(ctx, R.raw.change_chat_background)),
         SettingItemData("Delay Chat", rawResourceUri(ctx, R.raw.delay_chat)),
         SettingItemData("Request Account Deletion", rawResourceUri(ctx, R.raw.account_delete))

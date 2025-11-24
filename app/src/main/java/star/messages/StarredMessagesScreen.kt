@@ -36,7 +36,7 @@ fun StarredMessagesScreen(navController: NavController) {
     // 🔁 Timer effect to switch every 6 seconds
     LaunchedEffect(Unit) {
         while (true) {
-            delay(6000L)
+            delay(6000)  // 6 seconds
             currentVideo = if (currentVideo == R.raw.star_message1) {
                 R.raw.star_message2  // your second video
             } else {
