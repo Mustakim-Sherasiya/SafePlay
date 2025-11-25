@@ -78,6 +78,9 @@ fun CreateAccountScreen(
             Text(text = "Create Account", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(24.dp))
 
+            Text("Please enter COUNTRY CODE while entering PHONE NUMBER.")
+            Spacer(modifier = Modifier.height(24.dp))
+
             OutlinedTextField(
                 value = email,
                 onValueChange = {

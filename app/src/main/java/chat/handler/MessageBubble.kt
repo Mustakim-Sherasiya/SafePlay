@@ -43,8 +43,63 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.draw.drawBehind
+import kotlin.math.min
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 
 
+
+
+
+@OptIn(ExperimentalFoundationApi::class)
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+fun rainbowGlowBrush(): Brush {
+    val colors = listOf(
+        Color(0xFFFF00FF),  // magenta
+        Color(0xFFFF8A80),  // coral
+        Color(0xFFFFFF00),  // yellow
+        Color(0xFF80FF00),  // lime
+        Color(0xFF00FFFF),  // cyan
+        Color(0xFFB388FF)   // purple
+    )
+
+    val transition = rememberInfiniteTransition(label = "rainbowGlow")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 6000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rainbowShift"
+    )
+
+    return Brush.linearGradient(
+        colors = colors,
+        start = Offset(0f, shift),
+        end = Offset(shift, 0f),
+        tileMode = TileMode.Mirror
+    )
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@OptIn(ExperimentalFoundationApi::class)
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun MessageBubble(
@@ -53,6 +108,7 @@ fun MessageBubble(
     showAvatar: Boolean,                // retained but per your request avatar always shown from ChatScreen
     avatarUrl: String?,
     selected: Boolean,
+    highlight: Boolean = false,
     onLongPress: () -> Unit,
     onTap: () -> Unit,
     onRetrySend: (() -> Unit)? = null,   // called when FAILED retry button pressed
@@ -66,6 +122,35 @@ fun MessageBubble(
     val maxBubbleWidth = 320.dp
     val radius = 16.dp
     val timestampColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+
+
+
+
+    // 🔥 One-shot ripple when message becomes starredByMe = true
+    val rippleAnim = remember { Animatable(0f) }
+
+    LaunchedEffect(message.id, message.starredByMe) {
+        if (message.starredByMe) {
+            // restart ripple 0 → 1
+            rippleAnim.snapTo(0f)
+            rippleAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 1350,
+                    easing = FastOutSlowInEasing
+                )
+            )
+        } else {
+            // when un-starred, no ripple, just reset
+            rippleAnim.snapTo(0f)
+        }
+    }
+
+
+
+
+
+
 
     Row(
         modifier = Modifier
@@ -111,7 +196,7 @@ fun MessageBubble(
 
 // 💫 Halo expansion
             val haloExpansion by animateDpAsState(
-                targetValue = if (selected) 36.dp else 0.dp,
+                targetValue = if (selected || highlight) 36.dp else 0.dp,
                 animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
                 label = "haloExpansion"
             )
@@ -183,11 +268,25 @@ fun MessageBubble(
             Box(
                 modifier = Modifier
                     .widthIn(max = maxBubbleWidth)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onLongPress = { onLongPress() },
-                            onTap = { onTap() }
-                        )
+                    .combinedClickable(
+                        onClick = { onTap() },
+                        onLongClick = { onLongPress() }
+                    )
+                    // 🔊 Outward ripple glow when you star the message
+                    .drawBehind {
+                        val progress = rippleAnim.value
+                        if (progress > 0f) {
+                            val maxRadius = min(size.width, size.height) * 1.4f
+                            val radiusPx = maxRadius * progress
+                            val alpha = (1f - progress).coerceIn(0f, 1f)
+                            val rippleColor = Color(0xFF00FFFF)
+
+                            drawCircle(
+                                color = rippleColor.copy(alpha = alpha * 0.6f),
+                                radius = radiusPx,
+                                center = center
+                            )
+                        }
                     }
                     // 🌈 Outer aura
                     .background(
@@ -199,28 +298,64 @@ fun MessageBubble(
                         brush = if (selected) innerAura else Brush.radialGradient(listOf(Color.Transparent, Color.Transparent)),
                         shape = RoundedCornerShape(radius)
                     )
+
                     // 💫 Rim ring
                     .border(
-                        width = if (selected) 1.8.dp else 0.dp,
-                        brush = rimLight,
+                        width =
+                            when {
+                                selected || highlight -> 1.8.dp   // your normal selection glow
+                                message.starredByMe -> 2.2.dp     // thicker rainbow glow
+                                else -> 0.dp
+                            },
+                        brush =
+                            when {
+                                selected || highlight -> rimLight          // (existing cyan sweep)
+                                message.starredByMe -> rainbowGlowBrush()  // 🌈 RAINBOW GLOW
+                                else -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                            },
                         shape = RoundedCornerShape(radius)
                     )
+
                     // ✨ Reflective overlay that reacts to light pulse
                     .background(
                         brush = if (selected) reflectiveOverlay else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent)),
                         shape = RoundedCornerShape(radius)
                     )
                     // 🌟 Halo expansion shadow
+//                    .shadow(
+//                        if (selected) 28.dp + haloExpansion else 0.dp,
+//                        shape = RoundedCornerShape(radius),
+//                        ambientColor = if (selected)
+//                            primaryGlow.copy(alpha = 0.9f)
+//                        else Color.Transparent,
+//                        spotColor = if (selected)
+//                            secondaryGlow.copy(alpha = 0.9f)
+//                        else Color.Transparent
+//                    )
+
+
                     .shadow(
-                        if (selected) 28.dp + haloExpansion else 0.dp,
+                        when {
+                            selected || highlight -> 28.dp + haloExpansion   // strong glow
+                            message.starredByMe -> 18.dp                     // softer but visible for starred
+                            else -> 0.dp
+                        },
                         shape = RoundedCornerShape(radius),
-                        ambientColor = if (selected)
-                            primaryGlow.copy(alpha = 0.9f)
-                        else Color.Transparent,
-                        spotColor = if (selected)
-                            secondaryGlow.copy(alpha = 0.9f)
-                        else Color.Transparent
+                        ambientColor = when {
+                            selected || highlight -> primaryGlow.copy(alpha = 0.9f)
+                            message.starredByMe -> primaryGlow.copy(alpha = 0.45f)
+                            else -> Color.Transparent
+                        },
+                        spotColor = when {
+                            selected || highlight -> secondaryGlow.copy(alpha = 0.9f)
+                            message.starredByMe -> secondaryGlow.copy(alpha = 0.45f)
+                            else -> Color.Transparent
+                        }
                     )
+
+
+
+
                     .animateContentSize()
                     .padding(2.dp)
             )
@@ -394,6 +529,18 @@ fun MessageBubble(
                             )
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
+
+
+                                // ⭐ if this message is starred by me
+                                // 🌈 Multi-color glowing star if this message is starred by me
+                                if (message.starredByMe) {
+                                    GlowingStarIcon(
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        size = 16.dp
+                                    )
+                                }
+
+
                                 // reactions preview (condensed)
                                 if (message.reactions.isNotEmpty()) {
                                     ReactionPreview(
@@ -405,22 +552,51 @@ fun MessageBubble(
 
                                 // delivered / read ticks (only for messages I sent)
                                 if (isMine) {
-                                    // prefer read > delivered > single tick
                                     when {
-                                        message.read -> Icon(Icons.Default.DoneAll, contentDescription = "Read", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                        message.delivered -> Icon(Icons.Default.DoneAll, contentDescription = "Delivered", tint = timestampColor, modifier = Modifier.size(16.dp))
-                                        else -> Icon(Icons.Default.Done, contentDescription = "Sent", tint = timestampColor, modifier = Modifier.size(16.dp))
+                                        message.read -> Icon(
+                                            Icons.Default.DoneAll,
+                                            contentDescription = "Read",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+
+                                        message.delivered -> Icon(
+                                            Icons.Default.DoneAll,
+                                            contentDescription = "Delivered",
+                                            tint = timestampColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+
+                                        else -> Icon(
+                                            Icons.Default.Done,
+                                            contentDescription = "Sent",
+                                            tint = timestampColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
                                     Spacer(modifier = Modifier.width(6.dp))
                                 }
 
                                 // status indicator (SENDING/SENT/FAILED) for optimistic UI
                                 when (message.status) {
-                                    MessageStatus.SENDING -> Icon(Icons.Default.HourglassEmpty, contentDescription = "Sending", modifier = Modifier.size(16.dp))
-                                    MessageStatus.SENT -> { /* nothing extra — ticks show delivered/read */ }
+                                    MessageStatus.SENDING -> Icon(
+                                        Icons.Default.HourglassEmpty,
+                                        contentDescription = "Sending",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+
+                                    MessageStatus.SENT -> {
+                                        /* nothing extra — ticks show delivered/read */
+                                    }
+
                                     MessageStatus.FAILED -> {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Error, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                            Icon(
+                                                Icons.Default.Error,
+                                                contentDescription = "Failed",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                             if (onRetrySend != null) {
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
@@ -437,6 +613,7 @@ fun MessageBubble(
                                 }
                             }
                         }
+
                     }
                 }
             }
@@ -539,6 +716,65 @@ private fun ReactionPreview(reactions: Map<String, List<String>>, onClick: () ->
         }
     }
 }
+
+@Composable
+private fun GlowingStarIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    // 🌈 colors the star will cycle through
+    val colors = listOf(
+        Color(0xFFFFD700), // gold
+        Color(0xFFFF8A80), // soft red
+        Color(0xFF80D8FF), // cyan
+        Color(0xFFB388FF), // purple
+        Color(0xFFA7FFEB)  // mint
+    )
+
+    val transition = rememberInfiniteTransition(label = "starGlowTransition")
+
+    // animate a float from 0 → colors.size continuously
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = colors.size.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "starGlowPhase"
+    )
+
+    val index = phase.toInt() % colors.size
+    val nextIndex = (index + 1) % colors.size
+    val fraction = phase - phase.toInt()
+
+    // interpolate between current color and next color
+    val tintColor = androidx.compose.ui.graphics.lerp(
+        colors[index],
+        colors[nextIndex],
+        fraction
+    )
+
+    Box(
+        modifier = modifier
+            .shadow(
+                elevation = 10.dp,
+                shape = CircleShape,
+                ambientColor = tintColor.copy(alpha = 0.8f),
+                spotColor = tintColor.copy(alpha = 0.8f)
+            )
+            .padding(1.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Star,
+            contentDescription = "Starred",
+            tint = tintColor,
+            modifier = Modifier.size(size)
+        )
+    }
+}
+
 
 private fun niceTimestamp(tsMillis: Long): String {
     if (tsMillis <= 0L) return ""

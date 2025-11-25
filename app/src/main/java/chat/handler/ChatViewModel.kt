@@ -91,21 +91,35 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
             clearSelection()
             return
         }
+
+        // ✅ Use same key as toChatUiMessage(myPublicIdOrUid)
+        val myKey = myPublicId.ifBlank { myUid }
+
         val sel = _selected.value.toList()
         sel.forEach { messageId ->
-            val docRef = db.collection("chats").document(convoId).collection("messages").document(messageId)
+            val docRef = db.collection("chats")
+                .document(convoId)
+                .collection("messages")
+                .document(messageId)
+
             db.runTransaction { tx ->
                 val snap = tx.get(docRef)
-                val currentMap = (snap.get("starredBy") as? Map<String, Boolean>)?.toMutableMap() ?: mutableMapOf()
-                val currently = currentMap[myUid] == true
-                if (currently) currentMap.remove(myUid) else currentMap[myUid] = true
+                val currentMap = (snap.get("starredBy") as? Map<String, Boolean>)
+                    ?.toMutableMap()
+                    ?: mutableMapOf()
+
+                val currently = currentMap[myKey] == true
+                if (currently) {
+                    currentMap.remove(myKey)
+                } else {
+                    currentMap[myKey] = true
+                }
+
                 tx.update(docRef, "starredBy", currentMap)
             }
         }
         clearSelection()
     }
-
-
 
 
 
@@ -175,19 +189,24 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
                 val name = snap.getString("name")
                 val show = snap.getBoolean("showDisplayName") ?: false
                 val photo = snap.getString("photoUrl")
-                _otherUser.value = ChatUserUi(publicId = otherPublicId, name = name, showDisplayName = show, photoUrl = photo)
+                val publicIdDb = snap.getString("publicId") ?: otherPublicId
 
-                // resolve otherUid (doc id may be uid or publicId; try field "uid" too)
-                otherUid = when {
-                    snap.id.isNotBlank() && snap.id.length >= 6 && snap.id != otherPublicId -> snap.id
-                    snap.getString("uid") != null -> snap.getString("uid")
-                    else -> null
-                } ?: snap.getString("uid")
+                // Use actual publicId from DB for display
+                _otherUser.value = ChatUserUi(
+                    publicId = publicIdDb,
+                    name = name,
+                    showDisplayName = show,
+                    photoUrl = photo
+                )
+
+                // ✅ IMPORTANT: here we know this document ID is the other user's UID
+                otherUid = snap.getString("uid") ?: snap.id
 
                 // start listeners or refresh
                 startPresenceListener()
                 startListeningMessagesIfReady()
-            } else {
+            }
+            else {
                 // fallback query by publicId field
                 db.collection("users").whereEqualTo("publicId", otherPublicId).limit(1).get()
                     .addOnSuccessListener { docs ->
@@ -196,10 +215,21 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
                             val name = doc.getString("name")
                             val show = doc.getBoolean("showDisplayName") ?: false
                             val photo = doc.getString("photoUrl")
-                            _otherUser.value = ChatUserUi(publicId = otherPublicId, name = name, showDisplayName = show, photoUrl = photo)
-                            otherUid = if (!doc.id.isNullOrBlank()) doc.id else doc.getString("uid")
+                            val publicIdDb = doc.getString("publicId") ?: otherPublicId
+
+                            _otherUser.value = ChatUserUi(
+                                publicId = publicIdDb,
+                                name = name,
+                                showDisplayName = show,
+                                photoUrl = photo
+                            )
+
+// here doc.id will be the UID from /users
+                            otherUid = doc.getString("uid") ?: doc.id
+
                             startPresenceListener()
                             startListeningMessagesIfReady()
+
                         } else {
                             _otherUser.value = ChatUserUi(publicId = otherPublicId)
                             startListeningMessagesIfReady()
@@ -371,13 +401,19 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
                 }
 
                 if (snaps != null) {
-                    val msgs = snaps.documents.mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }
-                    Log.d(TAG, "messagesListener($uidConvo) update: ${msgs.size} messages")
+                    val msgs = snaps.documents
+                        .mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }
+                        // 🔹 safety: remove any duplicates by id and keep in time order
+                        .distinctBy { it.id }
+                        .sortedBy { it.timestamp }
+
+                    Log.d(TAG, "messagesListener($uidConvo) update: ${msgs.size} messages (deduped)")
                     _messages.value = msgs
                     markDeliveredForSnapshots(snaps.documents)
                 } else {
                     Log.d(TAG, "messagesListener($uidConvo) null snaps")
                 }
+
             }
 
         // ensure presence listener is (re)started
@@ -523,8 +559,17 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
                 // update lastLoadedSnapshot to last doc of this page (for next page)
                 lastLoadedSnapshot = docs.last()
                 // map to ChatUiMessage, reversed to ascending order, and prepend to current list
-                val older = docs.mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }.reversed()
-                _messages.value = older + _messages.value
+                val older = docs
+                    .mapNotNull { it.toChatUiMessage(myPublicId.ifBlank { myUid }) }
+                    .reversed()
+
+// 🔹 merge with existing and remove duplicates by id, keep time order
+                val merged = (older + _messages.value)
+                    .distinctBy { it.id }
+                    .sortedBy { it.timestamp }
+
+                _messages.value = merged
+
             }
             isLoadingEarlier = false
         }.addOnFailureListener { e ->
@@ -659,19 +704,54 @@ class ChatViewModel(private val otherPublicId: String) : ViewModel() {
         val messagesRef = chatDocRef.collection("messages")
 
         // Participants: prefer UIDs if available, fallback to publicIds
-        val participants = if (!myUid.isBlank() && !otherUid.isNullOrBlank()) {
+//        val participants = if (!myUid.isBlank() && !otherUid.isNullOrBlank()) {
+//            listOf(myUid, otherUid!!)
+//        } else {
+//            listOf(myPublicId.ifBlank { myUid }, otherPublicId)
+//        }
+//
+//        // ensure parent doc exists
+//        val chatMeta = mapOf<String, Any>(
+//            "participants" to participants,
+//            "lastMessage" to cleaned,
+//            "lastUpdated" to FieldValue.serverTimestamp(),
+//            "createdAt" to FieldValue.serverTimestamp()
+//        )
+
+
+
+
+        // Build participants carefully so reads/writes pass rules for both uid & publicId cases
+// We'll prefer UIDs when we have them; otherwise fallback to publicIds.
+// Also store both forms (uid & publicId) inside chat doc fields for easier dashboard lookups.
+        val leftId = myUid.ifBlank { myPublicId.ifBlank { myUid } } // prefer uid, fallback to publicId
+        val rightCandidate = otherUid ?: otherPublicId
+        val rightId = rightCandidate?.ifBlank { null } ?: otherPublicId
+
+// participantsList is what we use to assert who the conversation belongs to.
+// If we have both uids, store uids. If not, store publicId pair.
+        val participantsForDoc = if (!myUid.isBlank() && !otherUid.isNullOrBlank()) {
             listOf(myUid, otherUid!!)
         } else {
-            listOf(myPublicId.ifBlank { myUid }, otherPublicId)
+            listOf(myPublicId.ifBlank { myUid }, otherPublicId.ifBlank { myUid })
         }
 
-        // ensure parent doc exists
+// Additionally store a helper map with both uid and publicId for each participant (optional helpful metadata)
+        val metaParticipants = mapOf(
+            "participantA" to mapOf("uid" to myUid, "publicId" to myPublicId.ifBlank { myUid }),
+            "participantB" to mapOf("uid" to (otherUid ?: ""), "publicId" to (otherPublicId.ifBlank { otherUid ?: "" }))
+        )
+
         val chatMeta = mapOf<String, Any>(
-            "participants" to participants,
+            "participants" to participantsForDoc,       // used by rules & queries
+            "participantsMeta" to metaParticipants,    // optional: easier dashboard resolving
             "lastMessage" to cleaned,
             "lastUpdated" to FieldValue.serverTimestamp(),
             "createdAt" to FieldValue.serverTimestamp()
         )
+
+
+
 
         chatDocRef.set(chatMeta, SetOptions.merge()).addOnSuccessListener {
             val payload = hashMapOf<String, Any>(

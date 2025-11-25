@@ -61,6 +61,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.foundation.lazy.LazyListState
+
+
+
+
+
+// Helper: check if user is already near the bottom of the list
+private fun isNearBottom(state: LazyListState): Boolean {
+    val lastVisible = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return true
+    val total = state.layoutInfo.totalItemsCount
+    return total == 0 || lastVisible >= total - 3   // last ~3 items
+}
+
 
 
 
@@ -70,9 +83,13 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 fun ChatScreen(
     publicId: String,
     navController: androidx.navigation.NavController,
+    focusMessageId: String? = null,
     vm: ChatViewModel = viewModel(factory = ChatViewModelFactory(publicId))
 ) {
+
+
     val messages by vm.messages.collectAsState()
+    val myStarCount = remember(messages) { messages.count { it.starredByMe } }
     val pending by vm.pendingMessages.collectAsState()
     val selected by vm.selected.collectAsState()
     val otherUser by vm.otherUser.collectAsState()
@@ -107,7 +124,52 @@ fun ChatScreen(
         }
     }
 
+
     val listState = rememberLazyListState()
+
+    // 🔹 id of message that should glow for 2s
+    var glowTargetId by remember { mutableStateOf<String?>(null) }
+
+    // latch focus id only once
+    val focusIdOnce = remember(focusMessageId) { focusMessageId }
+
+
+// ✅ Single scroll logic: handles both focused case and normal case,
+//    and doesn't fight the user if they scrolled up.
+
+
+    LaunchedEffect(messages.lastOrNull()?.id, focusIdOnce) {
+        if (messages.isEmpty()) return@LaunchedEffect
+
+        val lastIndex = messages.lastIndex
+
+        if (!focusIdOnce.isNullOrBlank()) {
+            // Coming from Starred Messages → always go to that message
+            val index = messages.indexOfFirst { it.id == focusIdOnce }
+            if (index != -1) {
+                listState.scrollToItem(index)
+
+                // trigger glow
+                glowTargetId = focusIdOnce
+                kotlinx.coroutines.delay(2000)
+                if (glowTargetId == focusIdOnce) {
+                    glowTargetId = null
+                }
+            } else {
+                // message not found in list -> just scroll to bottom as fallback
+                if (lastIndex >= 0) {
+                    listState.animateScrollToItem(lastIndex)
+                }
+            }
+        } else {
+            // Normal chat open / new message:
+            // only auto-scroll if user is already near bottom
+            if (lastIndex >= 0 && isNearBottom(listState)) {
+                listState.animateScrollToItem(lastIndex)
+            }
+        }
+    }
+
 
     // auto-clear selection and typing when this Composable is disposed (navigated away)
     DisposableEffect(Unit) {
@@ -116,9 +178,6 @@ fun ChatScreen(
             vm.setTyping(false)
         }
     }
-
-
-
 
 
     // UI state for edit / delete / reactions dialogs
@@ -136,11 +195,15 @@ fun ChatScreen(
     var loadEarlierTriggeredAt by remember { mutableStateOf(0L) }
 
     // Scroll to bottom when new messages added (auto-scroll)
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
+    // Scroll to bottom smoothly when a NEW last message appears,
+// but don't restart animation for every little change.
+    LaunchedEffect(messages.lastOrNull()?.id) {
+        val lastIndex = messages.lastIndex
+        if (lastIndex >= 0) {
+            listState.animateScrollToItem(lastIndex)
         }
     }
+
 
     // Mark messages read when messages arrive / become visible
     LaunchedEffect(messages) {
@@ -163,7 +226,8 @@ fun ChatScreen(
 
     // Compute a friendly display name
     val displayName = remember(otherUser) {
-        val suffix = if (otherUser.publicId.length >= 2) otherUser.publicId.takeLast(2) else otherUser.publicId
+        val suffix =
+            if (otherUser.publicId.length >= 2) otherUser.publicId.takeLast(2) else otherUser.publicId
         if (otherUser.showDisplayName && !otherUser.name.isNullOrBlank()) otherUser.name!! else "User$suffix"
     }
 
@@ -202,7 +266,26 @@ fun ChatScreen(
                         }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                         }
-
+                    },
+                    actions = {
+                        if (myStarCount > 0) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Star,
+                                    contentDescription = "Starred messages",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = myStarCount.toString(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
                     }
                 )
             } else {
@@ -221,7 +304,7 @@ fun ChatScreen(
                         // Star selected
                         IconButton(onClick = {
                             vm.toggleStarSelected()
-                            Toast.makeText(context, "Star toggled", Toast.LENGTH_SHORT).show()
+
                         }) {
                             Icon(Icons.Outlined.Star, contentDescription = "Star selected")
                         }
@@ -235,7 +318,8 @@ fun ChatScreen(
                                     editDraft = msg.text
                                     editDialogOpen = true
                                 } else {
-                                    Toast.makeText(context, "Message not found", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Message not found", Toast.LENGTH_SHORT)
+                                        .show()
                                 }
                             }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit selected")
@@ -296,11 +380,13 @@ fun ChatScreen(
                             color = Color.White.copy(alpha = 0.9f),
                             modifier = Modifier
                                 .align(Alignment.CenterStart)
-                                .shadow(2.dp, ambientColor = Color.Black.copy(alpha = 0.6f)) // ✅ subtle glow here
+                                .shadow(
+                                    2.dp,
+                                    ambientColor = Color.Black.copy(alpha = 0.6f)
+                                ) // ✅ subtle glow here
                         )
                     }
                 }
-
 
 
                 // Messages list
@@ -322,6 +408,7 @@ fun ChatScreen(
                             showAvatar = true, // keep avatar always shown
                             avatarUrl = if (isMine) vm.myPhotoUrl else otherUser.photoUrl,
                             selected = selected.contains(msg.id),
+                            highlight = (glowTargetId == msg.id),
                             onLongPress = {
                                 // try to toggle selection as before
                                 vm.toggleSelect(msg.id)
@@ -419,24 +506,20 @@ fun ChatScreen(
                     IconButton(onClick = {
                         if (input.isNotBlank() && input.trim().isNotEmpty()) {
                             val textToSend = input.trim()
-                            // stop typing indicator
                             typingJob?.cancel()
                             vm.setTyping(false)
 
-                            vm.sendMessage(textToSend) { success, err ->
-                                if (!success) {
-                                    Toast.makeText(
-                                        context,
-                                        "Send failed: ${err ?: "unknown"}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                } else {
-                                    // success feedback
-                                }
-                            }
+                            vm.sendMessage(textToSend) { success, err -> /* your Toast */ }
+
                             input = ""
+
+                            // tiny delay so Firestore + snapshot listener can push the new message
                             scope.launch {
-                                if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+                                kotlinx.coroutines.delay(80)
+                                val lastIndex = messages.lastIndex
+                                if (lastIndex >= 0) {
+                                    listState.animateScrollToItem(lastIndex)
+                                }
                             }
                         } else {
                             // prevent sending spaces
@@ -464,7 +547,11 @@ fun ChatScreen(
                     val newText = editDraft
                     vm.editMessage(id, newText) { success, err ->
                         if (!success) {
-                            Toast.makeText(context, "Edit failed: ${err ?: "unknown"}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                "Edit failed: ${err ?: "unknown"}",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
                     editDialogOpen = false
@@ -485,7 +572,8 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Profanity will be filtered automatically.")
+                    Text("Please be in mindfull language while texting. ")
+                    //Text("Profanity will be filtered automatically.")
                 }
             }
         )
@@ -531,7 +619,10 @@ fun ChatScreen(
                 val chunked = emojis.chunked(4)
                 Column {
                     chunked.forEach { row ->
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
                             row.forEach { emoji ->
                                 Text(
                                     text = emoji,
@@ -540,7 +631,11 @@ fun ChatScreen(
                                             val id = reactionTargetMessageId
                                             if (!id.isNullOrBlank()) {
                                                 vm.toggleReaction(id, emoji) { success, err ->
-                                                    if (!success) Toast.makeText(context, "Reaction failed: ${err ?: "unknown"}", Toast.LENGTH_SHORT).show()
+                                                    if (!success) Toast.makeText(
+                                                        context,
+                                                        "Reaction failed: ${err ?: "unknown"}",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
                                                 }
                                                 reactionPickerOpen = false
                                                 reactionTargetMessageId = null
@@ -560,17 +655,22 @@ fun ChatScreen(
     }
 
     // When user presses back during dialog, clear typing presence
+    // Handle system back:
+// - If any message is selected → just clear selection
+// - If nothing selected → exit chat
     BackHandler {
-        vm.setTyping(false)
-        vm.clearSelection()
-        navController.popBackStack()
+        if (selected.isNotEmpty()) {
+            vm.clearSelection()
+        } else {
+            vm.setTyping(false)
+            navController.popBackStack()
+        }
     }
-
 }
 
 
 
-@OptIn(ExperimentalAnimationApi::class)
+    @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun PendingMessageBubble(
     pendingMsg: PendingMessage,

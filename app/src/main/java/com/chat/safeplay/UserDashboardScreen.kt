@@ -272,12 +272,13 @@ fun UserDashboardScreen(
                         val tempConvos = mutableListOf<ConversationOverview>()
 
                         snap.documents.forEach { doc ->
+                            val convoId = doc.id
                             val rawLast = doc.getString("lastMessage")?.trim() ?: ""
                             val hasMsg = rawLast.isNotBlank()
                             val participants = doc.get("participants") as? List<*>
                             val otherId = participants?.firstOrNull { it != uid } as? String ?: return@forEach
 
-                            // 🔥 Live listener for each participant’s profile
+                            // 🔥 Live listener for each participant’s profile (only once per otherId)
                             if (!userListeners.containsKey(otherId)) {
                                 val reg = db.collection("users").document(otherId)
                                     .addSnapshotListener { userSnap, _ ->
@@ -289,8 +290,9 @@ fun UserDashboardScreen(
                                             val suffix = if (publicId.length >= 2) publicId.takeLast(2) else publicId
                                             val displayName = if (show && !name.isNullOrBlank()) name else "User${suffix.uppercase()}"
 
+                                            // ✅ update only this conversation's card
                                             val updatedList = conversations.map { c ->
-                                                if (c.convoId.contains(otherId)) {
+                                                if (c.convoId == convoId) {
                                                     c.copy(title = displayName, photoUrl = photo)
                                                 } else c
                                             }
@@ -301,12 +303,16 @@ fun UserDashboardScreen(
                             }
 
                             val lastUpdatedTs = doc.getTimestamp("lastUpdated")?.toDate()?.time
+
+                            // ✅ re-use old title/photo if we already had them, so it doesn't reset to "Loading..."
+                            val old = conversations.find { it.convoId == convoId }
+
                             tempConvos.add(
                                 ConversationOverview(
-                                    convoId = doc.id,
-                                    title = "Loading...", // will update live
+                                    convoId = convoId,
+                                    title = old?.title ?: "Loading...", // keep old name if available
                                     lastMessage = if (hasMsg) rawLast else "No messages yet",
-                                    photoUrl = null,
+                                    photoUrl = old?.photoUrl,           // keep old photo if available
                                     hasMessages = hasMsg,
                                     lastUpdatedMillis = lastUpdatedTs
                                 )
@@ -318,6 +324,7 @@ fun UserDashboardScreen(
                     } else {
                         conversations = emptyList()
                     }
+
                 }
 
             onDispose {
@@ -961,18 +968,26 @@ fun UserDashboardScreen(
                         // --- Previous state to detect changes ---
                         var prevTitle by remember { mutableStateOf(conv.title) }
                         var prevPhoto by remember { mutableStateOf(conv.photoUrl) }
+                        var prevLastMessage by remember { mutableStateOf(conv.lastMessage) }
                         var glowActive by remember { mutableStateOf(false) }
 
                         // --- Detect change (live Firestore updates trigger this) ---
-                        LaunchedEffect(conv.title, conv.photoUrl) {
-                            if (conv.title != prevTitle || conv.photoUrl != prevPhoto) {
+                        LaunchedEffect(conv.title, conv.photoUrl, conv.lastMessage) {
+                            val titleChanged = conv.title != prevTitle
+                            val photoChanged = conv.photoUrl != prevPhoto
+                            val messageChanged = conv.lastMessage != prevLastMessage
+
+                            if (titleChanged || photoChanged || messageChanged) {
                                 prevTitle = conv.title
                                 prevPhoto = conv.photoUrl
+                                prevLastMessage = conv.lastMessage   // ✅ remember new last message
+
                                 glowActive = true
-                                kotlinx.coroutines.delay(1800)
+                                kotlinx.coroutines.delay(1800)       // keep your 1.8s glow
                                 glowActive = false
                             }
                         }
+
 
                         // --- Animate core glow intensity ---
                         val glowAlpha by animateFloatAsState(

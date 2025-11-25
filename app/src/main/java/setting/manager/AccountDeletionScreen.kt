@@ -26,6 +26,7 @@ import com.chat.safeplay.R
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.delay
 
+
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,37 +35,29 @@ fun AccountDeletionScreen(
     viewModel: AccountDeletionViewModel = viewModel()
 ) {
     val state by viewModel.state.collectAsState()
-
-    val context = LocalContext.current
     val deletionCompleted by viewModel.deletionCompleted.collectAsState()
+    val context = LocalContext.current
 
-    if (deletionCompleted) {
-        // 🔥 React when ViewModel finishes deletion
-        Toast.makeText(context, "Account permanently deleted.", Toast.LENGTH_LONG).show()
-
-        // Sign out locally
-        FirebaseAuth.getInstance().signOut()
-
-        // Navigate to home screen
-        navController.navigate("home") {
-            popUpTo(0)
-        }
-    }
-
-
-
-    var showDialog by remember { mutableStateOf(false) }
-    val vibrator = context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
-
-    // Navigate when deletion completes
+    // 🔄 All side-effects (toast, signOut, navigation) are handled here
     LaunchedEffect(deletionCompleted) {
         if (deletionCompleted) {
+            Toast.makeText(context, "Account permanently deleted.", Toast.LENGTH_LONG).show()
+
+            // Sign out locally
+            FirebaseAuth.getInstance().signOut()
+
+            // Small delay just for smooth UX (optional)
             delay(600)
+
+            // Navigate to home & clear backstack
             navController.navigate("home") {
                 popUpTo(0)
             }
         }
     }
+
+    var showDialog by remember { mutableStateOf(false) }
+    val vibrator = context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
 
     Scaffold(
         topBar = {
@@ -83,6 +76,7 @@ fun AccountDeletionScreen(
                             shape = CircleShape,
                             color = Color.Transparent
                         ) {
+                            // 🔁 Same animated video logo as before
                             VideoLogo(
                                 resId = R.raw.account_delete,
                                 modifier = Modifier.fillMaxSize()
@@ -115,7 +109,7 @@ fun AccountDeletionScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 if (state.isDeleteRequested) {
-                    // 🔴 Simple light-red timer layout
+                    // 🔴 Light-red timer layout (unchanged)
                     TimerInfoLightRed(
                         remainingTime = state.remainingTime,
                         scheduledTime = state.scheduledDeletionTime
@@ -127,7 +121,6 @@ fun AccountDeletionScreen(
                         onClick = {
                             vibrator.vibrate(VibrationEffect.createOneShot(40, 50))
                             viewModel.cancelDeletionProcess()
-
                         },
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -180,12 +173,15 @@ fun AccountDeletionScreen(
                 AlertDialog(
                     onDismissRequest = { showDialog = false },
                     title = { Text("Confirm Deletion") },
-                    text = { Text("Are you sure you want to delete your account? It will be deleted in 24 hours if not cancelled.") },
+                    text = {
+                        Text(
+                            "Are you sure you want to delete your account? It will be deleted in 24 hours if not cancelled."
+                        )
+                    },
                     confirmButton = {
                         TextButton(onClick = {
                             vibrator.vibrate(VibrationEffect.createOneShot(30, 60))
                             viewModel.startDeletionProcess()
-
                             showDialog = false
                         }) {
                             Text("Confirm", color = MaterialTheme.colorScheme.error)
@@ -207,7 +203,6 @@ fun TimerInfoLightRed(
     remainingTime: String,
     scheduledTime: String
 ) {
-    // Light red tone
     val lightRed = Color(0xFFFF7B7B)
 
     Column(
@@ -254,6 +249,18 @@ fun TimerInfoLightRed(
         )
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -393,7 +400,8 @@ fun TimerInfoLightRed(
 //                    Button(
 //                        onClick = {
 //                            vibrator.vibrate(VibrationEffect.createOneShot(40, 50))
-//                            viewModel.cancelDeletionProcess(context)
+//                            viewModel.cancelDeletionProcess()
+//
 //                        },
 //                        shape = RoundedCornerShape(12.dp),
 //                        colors = ButtonDefaults.buttonColors(
@@ -450,7 +458,8 @@ fun TimerInfoLightRed(
 //                    confirmButton = {
 //                        TextButton(onClick = {
 //                            vibrator.vibrate(VibrationEffect.createOneShot(30, 60))
-//                            viewModel.startDeletionProcess(context)
+//                            viewModel.startDeletionProcess()
+//
 //                            showDialog = false
 //                        }) {
 //                            Text("Confirm", color = MaterialTheme.colorScheme.error)
@@ -519,12 +528,6 @@ fun TimerInfoLightRed(
 //        )
 //    }
 //}
-//
-//
-//
-//
-//
-//
 //
 //
 //

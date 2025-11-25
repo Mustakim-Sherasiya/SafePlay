@@ -9,6 +9,7 @@ data class ChatUiMessage(
     val id: String,
     val fromId: String,      // publicId if available, else fallback to uid
     val fromUid: String?,    // optional uid field
+    val toId: String? = null,
     val text: String,
     val timestamp: Long,
     val isNarration: Boolean = false,
@@ -28,6 +29,7 @@ fun DocumentSnapshot.toChatUiMessage(myPublicIdOrUid: String): ChatUiMessage? {
     // Normalize fromId: prefer fromId (publicId) field, fallback to fromUid
     val fromId = getString("fromId") ?: getString("fromUid") ?: return null
     val fromUid = getString("fromUid")
+    val toId = getString("toId")
     val text = getString("text") ?: ""
 
     // Handle timestamp which might be Timestamp, Long, or Double
@@ -62,8 +64,9 @@ fun DocumentSnapshot.toChatUiMessage(myPublicIdOrUid: String): ChatUiMessage? {
 
     return ChatUiMessage(
         id = id,
-        fromId = fromId, // normalized (publicId preferred, else uid)
+        fromId = fromId,
         fromUid = fromUid,
+        toId = toId,
         text = text,
         timestamp = tsLong,
         isNarration = false,
@@ -74,6 +77,7 @@ fun DocumentSnapshot.toChatUiMessage(myPublicIdOrUid: String): ChatUiMessage? {
         edited = edited,
         status = MessageStatus.SENT
     )
+
 }
 
 
